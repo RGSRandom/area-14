@@ -15,14 +15,18 @@ logging.basicConfig(level=logging.INFO, handlers=[stream_handler])
 logger = logging.getLogger(__name__)
 
 # Load local environment variables from .env before reading BOT_TOKEN
-load_dotenv(dotenv_path=Path(__file__).with_name('.env'))
+repo_root = Path(__file__).resolve().parent.parent
+load_dotenv(dotenv_path=repo_root / '.env')
+
+config_file_path = (repo_root / 'json' / 'config.json').resolve()
+dangerous_perms_path = (repo_root / 'json' / 'dangerous_perms.json').resolve()
 
 # Load config
 try:
-    with open(Path(__file__).with_name('config.json'), 'r', encoding='utf-8') as f:
+    with config_file_path.open('r', encoding='utf-8') as f:
         config = json.load(f)
 
-    with open(Path(__file__).with_name('dangerous_perms.json'), 'r', encoding='utf-8') as f:
+    with dangerous_perms_path.open('r', encoding='utf-8') as f:
         dangerous_perms = json.load(f)
 except FileNotFoundError as exc:
     logger.error(f"Missing required file: {exc.filename}")

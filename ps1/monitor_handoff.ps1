@@ -1,4 +1,5 @@
-$repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repoRoot = Split-Path -Parent $scriptDir
 $pidFile = Join-Path $repoRoot "bot_local.pid"
 $stopFlag = Join-Path $repoRoot "stop_cloud.txt"
 $localReadyFlag = Join-Path $repoRoot "local_ready.txt"
@@ -128,7 +129,7 @@ if (Test-InternetConnection) {
     }
 
     if (-not (Test-Path $localReadyFlag)) {
-        & (Join-Path $repoRoot "run_local.ps1")
+        & (Join-Path $repoRoot "ps1\run_local.ps1")
     }
 
     Write-Host "Internet is available; local startup was ensured."
@@ -139,9 +140,10 @@ if (Test-LocalBotRunning) {
     if (Test-Path $localReadyFlag) {
         Remove-Item $localReadyFlag -Force -ErrorAction SilentlyContinue
     }
+    Write-Host "[HANDOFF] Internet is down and local bot is running. Switching to cloud fallback."
     Dispatch-CloudWorkflow -RepoName $repoName -Token $token
-    Write-Host "Internet is down; cloud fallback started."
+    Write-Host "[HANDOFF] Cloud fallback started."
     exit 0
 }
 
-Write-Host "No internet and local bot is not running."
+Write-Host "[HANDOFF] No internet and local bot is not running; cloud fallback was not started."

@@ -1,4 +1,5 @@
-$repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repoRoot = Split-Path -Parent $scriptDir
 $pidFile = Join-Path $repoRoot "bot_local.pid"
 $stopFlag = Join-Path $repoRoot "stop_cloud.txt"
 $localReadyFlag = Join-Path $repoRoot "local_ready.txt"
