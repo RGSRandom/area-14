@@ -7,8 +7,7 @@ import os
 import json
 import sys
 import asyncio
-
-
+import re
 
 script_path = Path(__file__).resolve()
 repo_root = script_path.parent if script_path.parent.name.lower() != "py" else script_path.parent.parent
@@ -200,13 +199,12 @@ def is_sync_enabled():
 def set_sync_enabled(enabled):
     global _sync_enabled
     _sync_enabled = enabled
-
-
 token = os.getenv("BOT_TOKEN")
 
 intent = discord.Intents.default()
 intent.message_content = True
 intent.members = True
+intent.guilds=True
 
 bot = commands.Bot(command_prefix='a!', intents=intent, help_command=None)   
 
@@ -241,7 +239,20 @@ async def on_ready():
     except Exception:
         logger.info("[DEBUG] target guild resolution raised an exception")
 
-    # Start the sync loop if not already running
+    logger.info("=" * 50)
+    logger.info("🚀 Running startup role sync...")
+    logger.info("=" * 50)
+
+    try:
+        await perform_manual_sync(None)
+    except Exception as e:
+        logger.error(f"Startup sync failed: {e}", exc_info=True)
+
+    logger.info("=" * 50)
+    logger.info("✅ Startup sync finished")
+    logger.info("=" * 50)
+
+    # Start the periodic sync afterwards
     if not sync_roles.is_running():
         sync_roles.start()
         logger.info("🔄 Started periodic role sync (every 30 minutes)")
@@ -293,7 +304,7 @@ async def sync_roles():
             # Try to find this member in each configured source guild
             should_have_target_roles = set()
             for source_guild in source_guilds:
-                source_member = source_guild.get_member(target_member.id)
+                source_member = await source_guild.fetch_member(target_member.id)
                 if not source_member:
                     continue
 
@@ -330,128 +341,6 @@ async def sync_roles():
     
     logger.info(f"✅ Periodic sync complete! {synced_count} role changes made")
 
-@bot.event
-async def on_member_update(before, after):
-    # Debug: show before/after role IDs and guild context
-    before_role_ids = {role.id for role in before.roles}
-    after_role_ids = {role.id for role in after.roles}
-    logger.info(f"[DEBUG] on_member_update triggered for user {after.id} in guild {after.guild.id}")
-    logger.info(f"[DEBUG] before roles: {sorted(before_role_ids)}")
-    logger.info(f"[DEBUG] after roles:  {sorted(after_role_ids)}")
-
-    if before_role_ids == after_role_ids:
-        logger.info("[DEBUG] No role changes detected  returning")
-        return  # No role changes
-
-    # Load server IDs from config
-    config_data = load_config()
-    source_guild_ids = get_source_guild_ids(config_data)
-    TARGET_GUILD_ID = config_data["TARGET_GUILD_ID"]
-
-    logger.info(f"[DEBUG] Config source_guild_ids={source_guild_ids}, TARGET_GUILD_ID={TARGET_GUILD_ID}")
-
-    if not is_sync_enabled():
-        logger.info("[DEBUG] Sync is paused; skipping live role update handling")
-        return
-
-    try:
-        if not should_sync_user(after.id, config_data):
-            logger.info(f"[DEBUG] Ignoring member update for {after.id}; not the configured test user")
-            return
-    except ValueError as exc:
-        logger.error(str(exc))
-        return
-
-    # Only trigger if this happened in one of the configured source servers
-    if after.guild.id not in source_guild_ids:
-        logger.info(f"[DEBUG] Event guild {after.guild.id} not in configured source guilds — ignoring")
-        return
-
-    # Get target guild
-    target_guild = bot.get_guild(TARGET_GUILD_ID)
-    if not target_guild:
-        logger.error(f"[DEBUG] Target guild {TARGET_GUILD_ID} not found")
-        return
-
-    # Get the member in the target server
-    target_member = target_guild.get_member(after.id)
-    if not target_member:
-        logger.warning(f"[DEBUG] Member {after.id} not found in target guild")
-        return
-
-    role_mapping = build_role_mapping(config_data)
-    current_dangerous_perms = load_dangerous_perms()
-    logger.info(f"[DEBUG] Role mapping has {len(role_mapping)} entries")
-
-    # Check for roles that were added
-    new_role_ids = after_role_ids - before_role_ids
-    logger.info(f"[DEBUG] New role IDs: {sorted(new_role_ids)}")
-    for added_role_id in new_role_ids:
-        # Debug lookup
-        logger.info(f"[DEBUG] Processing added source role id: {added_role_id}")
-        target_role_ids = role_mapping.get(added_role_id)
-        if not target_role_ids:
-            logger.info(f"[DEBUG] No mapping for source role {added_role_id}")
-            continue  # No mapping for this role
-
-        for target_role_id in target_role_ids:
-            try:
-                # Get the role to apply
-                target_role = target_guild.get_role(target_role_id)
-                if not target_role:
-                    logger.error(f"[DEBUG] Target role {target_role_id} not found")
-                    continue
-
-                # Check if the target role has dangerous permissions
-                dangerous_perms_list = current_dangerous_perms.get("dangerous_permissions", [])
-                role_permissions = target_role.permissions
-
-                dangerous_found = []
-                for perm in dangerous_perms_list:
-                    has = getattr(role_permissions, perm, False)
-                    logger.info(f"[DEBUG] Role '{target_role.name}' perm {perm}: {has}")
-                    if has:
-                        dangerous_found.append(perm)
-
-                if dangerous_found:
-                    logger.warning(f"🚫 BLOCKED: Role '{target_role.name}' has dangerous permissions: {dangerous_found}")
-                    logger.warning(f"   User {after.name} was NOT given this role. Edit dangerous_perms.json if needed.")
-                    continue
-
-                # Apply the role
-                logger.info(f"[DEBUG] Attempting to add role '{target_role.name}' ({target_role.id}) to user {after.id}")
-                await target_member.add_roles(target_role)
-                logger.info(f"✅ Added role '{target_role.name}' to {after.name} in target server")
-
-            except Exception as e:
-                logger.error(f"Error adding role for added role id {added_role_id} -> target {target_role_id}: {e}", exc_info=True)
-
-    # Check for roles that were removed
-    removed_role_ids = before_role_ids - after_role_ids
-    logger.info(f"[DEBUG] Removed role IDs: {sorted(removed_role_ids)}")
-    for removed_role_id in removed_role_ids:
-        logger.info(f"[DEBUG] Processing removed source role id: {removed_role_id}")
-        target_role_ids = role_mapping.get(removed_role_id)
-        if not target_role_ids:
-            logger.info(f"[DEBUG] No mapping for removed source role {removed_role_id}")
-            continue  # No mapping for this role
-
-        for target_role_id in target_role_ids:
-            try:
-                # Get the role to remove
-                target_role = target_guild.get_role(target_role_id)
-                if not target_role:
-                    logger.error(f"[DEBUG] Target role {target_role_id} not found")
-                    continue
-
-                # Remove the role
-                logger.info(f"[DEBUG] Attempting to remove role '{target_role.name}' ({target_role.id}) from user {after.id}")
-                await target_member.remove_roles(target_role)
-                logger.info(f"🗑️ Removed role '{target_role.name}' from {after.name} in target server")
-
-            except Exception as e:
-                logger.error(f"Error removing role for removed role id {removed_role_id} -> target {target_role_id}: {e}", exc_info=True)
-
 # --- Manual `a!sync` command and concurrency guard ---
 # Track active syncs per target guild to prevent cross-source conflicts
 active_sync_targets = set()
@@ -462,10 +351,14 @@ async def perform_manual_sync(triggering_message):
     This version fetches full member lists from source and target guilds to avoid cache misses.
     """
     if not is_sync_enabled():
-        embed = discord.Embed(title="Sync Paused",
-                              description="Sync is currently paused. Use a!start first.",
-                              color=discord.Color.orange())
-        await triggering_message.channel.send(embed=embed)
+        if triggering_message:
+            await triggering_message.channel.send(
+                embed=discord.Embed(
+                    title="Sync Paused",
+                    description="Sync is currently paused. Use a!start first.",
+                    color=discord.Color.orange()
+                )
+            )
         return
 
     config_data = load_config()
@@ -480,14 +373,14 @@ async def perform_manual_sync(triggering_message):
         embed = discord.Embed(title="Error: Guilds not available",
                               description="One or more configured servers are not available to the bot. Please check the bot's permissions.",
                               color=discord.Color.red())
-        await triggering_message.channel.send(embed=embed)
+        await status_msg.edit(embed=embed)
         return
 
     if TARGET_GUILD_ID in active_sync_targets:
         embed = discord.Embed(title="Sync Already Running",
                               description="A sync is already running for the target server; cannot start another.",
                               color=discord.Color.orange())
-        await triggering_message.channel.send(embed=embed)
+        await status_msg.edit(embed=embed)
         return
 
     # Mark sync active for this target
@@ -495,7 +388,10 @@ async def perform_manual_sync(triggering_message):
     embed = discord.Embed(title="Manual Sync Started",
                             description="Fetching members and syncing roles.",
                             color=discord.Color.blue())
-    status_msg = await triggering_message.channel.send(embed=embed)
+    if triggering_message:
+        status_msg = await triggering_message.channel.send(embed=embed)
+    else:
+        status_msg = None
 
     # Fetch full member lists to avoid relying on partial cache
     try:
@@ -529,7 +425,10 @@ async def perform_manual_sync(triggering_message):
                 embed = discord.Embed(title="Manual Sync in Progress",
                                     description=f"Processed {processed}/{total_members} members - {changes} role changes so far",
                                     color=discord.Color.blue())
-                await status_msg.edit(embed=embed)
+                if status_msg:
+                    await status_msg.edit(embed=embed)
+                else:
+                    logger.info(f"Startup Sync: {processed}/{total_members} members - {changes} changes")
                 await asyncio.sleep(2)
         except Exception:
             pass
@@ -601,79 +500,6 @@ async def perform_manual_sync(triggering_message):
         active_sync_targets.discard(TARGET_GUILD_ID)
 
 
-@bot.event
-async def on_message(message):
-    if message.author.bot:
-        return
-
-    content = message.content.strip().lower()
-    if content == 'a!start':
-        if not is_controlled_user(message.author.id):
-            embed = discord.Embed(title="Unauthorized",
-                                  description="You are not authorized to use this command.",
-                                  color=discord.Color.red())
-            await message.channel.send(embed=embed)
-            return
-        set_sync_enabled(True)
-        embed = discord.Embed(title="Sync Started",
-                              description="Role sync has been started.",
-                              color=discord.Color.green())
-        await message.channel.send(embed=embed)
-        return
-
-    if content == 'a!stop':
-        if not is_controlled_user(message.author.id):
-            embed = discord.Embed(title="Unauthorized",
-                                  description="You are not authorized to use this command.",
-                                  color=discord.Color.red())
-            await message.channel.send(embed=embed)
-            return
-        set_sync_enabled(False)
-        embed = discord.Embed(title="Sync Paused",
-                              description="Sync has been paused.",
-                              color=discord.Color.yellow())
-        await message.channel.send(embed=embed)
-        return
-
-    if content == 'a!sync':
-        if not is_controlled_user(message.author.id):
-            embed = discord.Embed(title="Unauthorized",
-                                  description="You are not authorized to use this command.",
-                                  color=discord.Color.red())
-            await message.channel.send(embed=embed)
-            return
-        try:
-            await perform_manual_sync(message)
-        except ValueError as exc:
-            embed = discord.Embed(title="Sync Error",
-                                  description=str(exc),
-                                  color=discord.Color.red())
-            await message.channel.send(embed=embed)
-        return
-    if content == 'a!debug':
-        # Provide a quick debug dump to the invoking channel
-        config_data = load_config()
-        dangerous_perms_data = load_dangerous_perms()
-        source_guild_ids = get_source_guild_ids(config_data)
-        role_mapping = build_role_mapping(config_data)
-        lines = [
-            f"Debug dump:",
-            f"Bot ID: {bot.user.id}",
-            f"Members intent: {bot.intents.members}",
-            f"Source guild IDs: {source_guild_ids}",
-            f"Target guild ID: {config_data['TARGET_GUILD_ID']}",
-            f"Role mappings loaded: {len(role_mapping)} entries",
-            f"Dangerous permissions loaded: {len(dangerous_perms_data.get('dangerous_permissions', []))}"
-        ]
-        # show a few mapping samples
-        sample = list(role_mapping.items())[:10]
-        for s, t in sample:
-            lines.append(f"  {s} -> {t}")
-        await message.channel.send("\n".join(lines))
-        return
-
-    await bot.process_commands(message)
-
 class GeneralSupportModal(discord.ui.Modal, title="General Support"):
     roblox = discord.ui.TextInput(
         label="What is your Roblox username?",
@@ -725,8 +551,14 @@ class GeneralSupportModal(discord.ui.Modal, title="General Support"):
 
         category = guild.get_channel(CATEGORY_ID)
 
+        safe_name = re.sub(
+            r"[^a-z0-9-]",
+            "",
+            interaction.user.name.lower()
+        )
+
         await guild.create_text_channel(
-            name=f"general-{interaction.user.name}",
+            name=f"general-{safe_name}",
             category=category,
             overwrites=overwrites
         )      
@@ -797,8 +629,14 @@ class PartnershipSupportModal(discord.ui.Modal, title="Partnership Support"):
 
         category = guild.get_channel(CATEGORY_ID)
 
+        safe_name = re.sub(
+            r"[^a-z0-9-]",
+            "",
+            interaction.user.name.lower()
+        )
+
         await guild.create_text_channel(
-            name=f"partnership-{interaction.user.name}",
+            name=f"partnership-{safe_name}",
             category=category,
             overwrites=overwrites
         )
@@ -857,40 +695,25 @@ class InGameReportsModal(discord.ui.Modal, title="In-Game Reports"):
             CATEGORY_ID = 1509601039412625439
 
             category = guild.get_channel(CATEGORY_ID)
-
+            safe_name = re.sub(
+                r"[^a-z0-9-]",
+                "",
+                interaction.user.name.lower()
+            )
             await guild.create_text_channel(
-                name=f"report-{interaction.user.name}",
+                name=f"report-{safe_name}",
                 category=category,
                 overwrites=overwrites
             )
 
-class SupportTicketView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(
-            discord.ui.Select(
-                placeholder="Choose a support type",
-                options=[
-                    discord.SelectOption(
-                        label="⚒️  |  General Support",
-                        value="general_support",
-                        description="General questions or inquiries.",
-                    ),
-                    discord.SelectOption(
-                        label="🤝  |  Partnership Support",
-                        value="partnership_support",
-                        description="Partnership discussions or collaborations.",
-                    ),
-                    discord.SelectOption(
-                        label="🎮  |  In-Game Reports",
-                        value="in_game_reports",
-                        description="Report rule-breaking in-game.",
-                    ),
-                ],
-                custom_id="support_ticket_select",
-            )
-        )
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
 
+    await bot.process_commands(message)
+
+class SupportTicketView(discord.ui.View):
     @discord.ui.select(custom_id="support_ticket_select")
     async def support_select(self, interaction, select):
         selected_value = select.values[0]
@@ -944,6 +767,7 @@ async def ticket_command(ctx):
     embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
     embed.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
     await ctx.send(embed=embed, view=SupportTicketView())
+
 
 
 if __name__ == "__main__":

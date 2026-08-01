@@ -1,4 +1,4 @@
-name: Discord Bot 24/7
+name: Discord Bot Workflow
 
 on:
   schedule:
