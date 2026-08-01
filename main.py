@@ -112,14 +112,23 @@ if not isinstance(config["role_mappings"], list) or not config["role_mappings"]:
     sys.exit(1)
 
 def build_role_mapping(config_data=None):
+    """Build a mapping of source_role_id -> list of target_role_ids.
+
+    A single source role can map to more than one target role (e.g. one
+    config.json entry for the department role, another for an "Area High
+    Rank" role sharing the same source_role_id). Using a list here (instead
+    of overwriting a single value) ensures every configured target role is
+    kept rather than only the last one seen for a given source_role_id.
+    """
     if config_data is None:
         config_data = load_config()
     role_mapping = {}
     for mapping in config_data["role_mappings"]:
         if "source_role_id" not in mapping or "target_role_id" not in mapping:
             raise ValueError("Each role mapping must include source_role_id and target_role_id")
-        role_mapping[mapping["source_role_id"]] = mapping["target_role_id"]
-    logger.info(f"[DEBUG] build_role_mapping produced {len(role_mapping)} entries")
+        role_mapping.setdefault(mapping["source_role_id"], []).append(mapping["target_role_id"])
+    logger.info(f"[DEBUG] build_role_mapping produced {len(role_mapping)} source entries "
+                f"({sum(len(v) for v in role_mapping.values())} total target roles)")
     return role_mapping
 
 
@@ -290,7 +299,7 @@ async def sync_roles():
 
                 for source_role in source_member.roles:
                     if source_role.id in role_mapping:
-                        should_have_target_roles.add(role_mapping[source_role.id])
+                        should_have_target_roles.update(role_mapping[source_role.id])
 
             if not should_have_target_roles:
                 continue
@@ -380,66 +389,68 @@ async def on_member_update(before, after):
     for added_role_id in new_role_ids:
         # Debug lookup
         logger.info(f"[DEBUG] Processing added source role id: {added_role_id}")
-        target_role_id = role_mapping.get(added_role_id)
-        if not target_role_id:
+        target_role_ids = role_mapping.get(added_role_id)
+        if not target_role_ids:
             logger.info(f"[DEBUG] No mapping for source role {added_role_id}")
             continue  # No mapping for this role
 
-        try:
-            # Get the role to apply
-            target_role = target_guild.get_role(target_role_id)
-            if not target_role:
-                logger.error(f"[DEBUG] Target role {target_role_id} not found")
-                continue
+        for target_role_id in target_role_ids:
+            try:
+                # Get the role to apply
+                target_role = target_guild.get_role(target_role_id)
+                if not target_role:
+                    logger.error(f"[DEBUG] Target role {target_role_id} not found")
+                    continue
 
-            # Check if the target role has dangerous permissions
-            dangerous_perms_list = current_dangerous_perms.get("dangerous_permissions", [])
-            role_permissions = target_role.permissions
+                # Check if the target role has dangerous permissions
+                dangerous_perms_list = current_dangerous_perms.get("dangerous_permissions", [])
+                role_permissions = target_role.permissions
 
-            dangerous_found = []
-            for perm in dangerous_perms_list:
-                has = getattr(role_permissions, perm, False)
-                logger.info(f"[DEBUG] Role '{target_role.name}' perm {perm}: {has}")
-                if has:
-                    dangerous_found.append(perm)
+                dangerous_found = []
+                for perm in dangerous_perms_list:
+                    has = getattr(role_permissions, perm, False)
+                    logger.info(f"[DEBUG] Role '{target_role.name}' perm {perm}: {has}")
+                    if has:
+                        dangerous_found.append(perm)
 
-            if dangerous_found:
-                logger.warning(f"🚫 BLOCKED: Role '{target_role.name}' has dangerous permissions: {dangerous_found}")
-                logger.warning(f"   User {after.name} was NOT given this role. Edit dangerous_perms.json if needed.")
-                continue
+                if dangerous_found:
+                    logger.warning(f"🚫 BLOCKED: Role '{target_role.name}' has dangerous permissions: {dangerous_found}")
+                    logger.warning(f"   User {after.name} was NOT given this role. Edit dangerous_perms.json if needed.")
+                    continue
 
-            # Apply the role
-            logger.info(f"[DEBUG] Attempting to add role '{target_role.name}' ({target_role.id}) to user {after.id}")
-            await target_member.add_roles(target_role)
-            logger.info(f"✅ Added role '{target_role.name}' to {after.name} in target server")
+                # Apply the role
+                logger.info(f"[DEBUG] Attempting to add role '{target_role.name}' ({target_role.id}) to user {after.id}")
+                await target_member.add_roles(target_role)
+                logger.info(f"✅ Added role '{target_role.name}' to {after.name} in target server")
 
-        except Exception as e:
-            logger.error(f"Error adding role for added role id {added_role_id}: {e}", exc_info=True)
+            except Exception as e:
+                logger.error(f"Error adding role for added role id {added_role_id} -> target {target_role_id}: {e}", exc_info=True)
 
     # Check for roles that were removed
     removed_role_ids = before_role_ids - after_role_ids
     logger.info(f"[DEBUG] Removed role IDs: {sorted(removed_role_ids)}")
     for removed_role_id in removed_role_ids:
         logger.info(f"[DEBUG] Processing removed source role id: {removed_role_id}")
-        target_role_id = role_mapping.get(removed_role_id)
-        if not target_role_id:
+        target_role_ids = role_mapping.get(removed_role_id)
+        if not target_role_ids:
             logger.info(f"[DEBUG] No mapping for removed source role {removed_role_id}")
             continue  # No mapping for this role
 
-        try:
-            # Get the role to remove
-            target_role = target_guild.get_role(target_role_id)
-            if not target_role:
-                logger.error(f"[DEBUG] Target role {target_role_id} not found")
-                continue
+        for target_role_id in target_role_ids:
+            try:
+                # Get the role to remove
+                target_role = target_guild.get_role(target_role_id)
+                if not target_role:
+                    logger.error(f"[DEBUG] Target role {target_role_id} not found")
+                    continue
 
-            # Remove the role
-            logger.info(f"[DEBUG] Attempting to remove role '{target_role.name}' ({target_role.id}) from user {after.id}")
-            await target_member.remove_roles(target_role)
-            logger.info(f"🗑️ Removed role '{target_role.name}' from {after.name} in target server")
+                # Remove the role
+                logger.info(f"[DEBUG] Attempting to remove role '{target_role.name}' ({target_role.id}) from user {after.id}")
+                await target_member.remove_roles(target_role)
+                logger.info(f"🗑️ Removed role '{target_role.name}' from {after.name} in target server")
 
-        except Exception as e:
-            logger.error(f"Error removing role for removed role id {removed_role_id}: {e}", exc_info=True)
+            except Exception as e:
+                logger.error(f"Error removing role for removed role id {removed_role_id} -> target {target_role_id}: {e}", exc_info=True)
 
 # --- Manual `a!sync` command and concurrency guard ---
 # Track active syncs per target guild to prevent cross-source conflicts
@@ -543,7 +554,7 @@ async def perform_manual_sync(triggering_message):
                         continue
                     for source_role in source_member.roles:
                         if source_role.id in role_mapping:
-                            should_have_target_roles.add(role_mapping[source_role.id])
+                            should_have_target_roles.update(role_mapping[source_role.id])
 
                 if not should_have_target_roles:
                     processed += 1
@@ -678,6 +689,7 @@ class GeneralSupportModal(discord.ui.Modal, title="General Support"):
     ) 
     async def on_submit(self, interaction: discord.Interaction):
         STAFF_ROLE_ID = 1389925525312507924
+        guild = interaction.guild
         everyone = guild.default_role
         member = interaction.user
         staff = guild.get_role(STAFF_ROLE_ID)
@@ -708,7 +720,6 @@ class GeneralSupportModal(discord.ui.Modal, title="General Support"):
                 use_application_commands=True,
             )
         } 
-        guild = interaction.guild
 
         CATEGORY_ID = 1389925682678730782
 
@@ -750,6 +761,7 @@ class PartnershipSupportModal(discord.ui.Modal, title="Partnership Support"):
     )
     async def on_submit(self, interaction: discord.Interaction):
         STAFF_ROLE_ID = 1389925525312507924
+        guild = interaction.guild
         everyone = guild.default_role
         member = interaction.user
         staff = guild.get_role(STAFF_ROLE_ID)
@@ -780,7 +792,6 @@ class PartnershipSupportModal(discord.ui.Modal, title="Partnership Support"):
                 use_application_commands=True,
             )
         } 
-        guild = interaction.guild
 
         CATEGORY_ID = 1389925682678730782
 
@@ -811,6 +822,7 @@ class InGameReportsModal(discord.ui.Modal, title="In-Game Reports"):
     )
     async def on_submit(self, interaction: discord.Interaction):
             STAFF_ROLE_ID = 1389925525312507924
+            guild = interaction.guild
             everyone = guild.default_role
             member = interaction.user
             staff = guild.get_role(STAFF_ROLE_ID)
@@ -841,7 +853,6 @@ class InGameReportsModal(discord.ui.Modal, title="In-Game Reports"):
                     use_application_commands=True,
                 )
             }             
-            guild = interaction.guild
 
             CATEGORY_ID = 1509601039412625439
 
