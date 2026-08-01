@@ -1,10 +1,10 @@
 # Discord Bot - Local Run (PowerShell)
 
-$repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $mainFile = Join-Path $repoRoot "main.py"
 $pidFile = Join-Path $repoRoot "bot_local.pid"
 $taskName = "DiscordBotCloudOnShutdown"
-$taskScript = Join-Path $repoRoot "switch_to_cloud.ps1"
+$taskScript = Join-Path $repoRoot "scripts\switch_to_cloud.ps1"
 $logPath = Join-Path $repoRoot "discord-bot-local.log"
 $localReadyFlag = Join-Path $repoRoot "local_ready.txt"
 
