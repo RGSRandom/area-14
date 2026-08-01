@@ -1,0 +1,172 @@
+{
+  "SOURCE_GUILD_ID": 1345167167859064944,
+  "TARGET_GUILD_ID": 1297640433878433792,
+  "TEST_USER_ID": 1020581214077333525,
+  "role_mappings": [
+    {
+      "_comment": "Faction High Rank",
+      "source_role_id": 1350190125988053012,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Elite Faction High Rank",
+      "source_role_id": 1370761432068657235,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Faction High Command",
+      "source_role_id": 1350190228526075977,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Elite Faction High Command",
+      "source_role_id": 1370761438251057235,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Faction Leader",
+      "source_role_id": 1350190129888624852,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Elite Faction Leader",
+      "source_role_id": 1370761435994652682,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Faction Member",
+      "source_role_id": 1376205232152907927,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Elite Faction Memeber",
+      "source_role_id": 1376205235445436547,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Department High Rank",
+      "source_role_id": 1375888773316874374,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Department High Command",
+      "source_role_id": 1375888779407003688,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Deputy Department Director",
+      "source_role_id": 1375888776491962378,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Department Director",
+      "source_role_id": 1345168738307281116,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Deputy Department Director Area High Rank",
+      "source_role_id": 1375888776491962378,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Department Director Area High Rank",
+      "source_role_id": 1345168738307281116,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Administrative Department",
+      "source_role_id": 1395993416277426247,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Ethics Committee",
+      "source_role_id": 1381024497796382750,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Internal Security Department",
+      "source_role_id": 1395992997900058766,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Department of Site Task Forces",
+      "source_role_id": 1473401864543277209,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Security Department",
+      "source_role_id": 1381742841096573019,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Medical Department",
+      "source_role_id": 1472726730513977354,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Department of Analytics",
+      "source_role_id": 1464034819376939039,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Internal Tribunal Department",
+      "source_role_id": 1436461261343690823,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Recordkeeping And Information Security Administration",
+      "source_role_id": 1399410290843586741,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Foundation Intelligence Agency",
+      "source_role_id": 1516435085010800711,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Department of Science & Research",
+      "source_role_id": 1395993236534857800,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Nu-7 “Hammer Down” SPEC ",
+      "source_role_id": 1492079405936414751,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "The Black Knights SPEC",
+      "source_role_id": 1000000000000000000,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "BARGHEST SPEC",
+      "source_role_id": 1000000000000000000,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Blackwood Research Corporation SPEC",
+      "source_role_id": 1000000000000000000,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Alpha-1 \"Red Right Hand\" SPEC",
+      "source_role_id": 1525900751967096993,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Beta-1 \"Cauterizers\" SPEC",
+      "source_role_id": 1502381704927641802,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Blackwater Worldwide SPEC",
+      "source_role_id": 1000000000000000000,
+      "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Faction Management",
+      "source_role_id": 1346192810998501396,
+      "target_role_id": 1526535297037369374
+    }
+  ]
+}

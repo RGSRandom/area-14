@@ -1,0 +1,33 @@
+name: Discord Bot 24/7
+
+on:
+  schedule:
+    # Restart bot every 5 hours to keep it running
+    - cron: '0 */5 * * *'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330  # 5.5 hours, leaves buffer before 6-hour limit
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Run Discord Bot
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: python main.py
