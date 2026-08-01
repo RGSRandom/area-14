@@ -6,7 +6,8 @@ $mainFile = Join-Path $repoRoot "py\main.py"
 $pidFile = Join-Path $repoRoot "bot_local.pid"
 $taskName = "DiscordBotCloudOnShutdown"
 $taskScript = Join-Path $repoRoot "ps1\switch_to_cloud.ps1"
-$logPath = Join-Path $repoRoot "discord-bot-local.log"
+$stdoutLogPath = Join-Path $repoRoot "discord-bot-local.log"
+$stderrLogPath = Join-Path $repoRoot "discord-bot-local.err.log"
 $localReadyFlag = Join-Path $repoRoot "local_ready.txt"
 
 Write-Host "`n========================================" -ForegroundColor Cyan
@@ -71,7 +72,7 @@ if (-not (Test-Path (Join-Path $repoRoot ".env"))) {
 
 # Run bot in the background
 Write-Host "`nStarting bot...`n" -ForegroundColor Green
-$process = Start-Process -FilePath (Join-Path $repoRoot ".venv\Scripts\python.exe") -ArgumentList @("-u", $mainFile) -WorkingDirectory $repoRoot -WindowStyle Hidden -RedirectStandardOutput $logPath -RedirectStandardError $logPath -PassThru
+$process = Start-Process -FilePath (Join-Path $repoRoot ".venv\Scripts\python.exe") -ArgumentList @("-u", $mainFile) -WorkingDirectory $repoRoot -WindowStyle Hidden -RedirectStandardOutput $stdoutLogPath -RedirectStandardError $stderrLogPath -PassThru
 $process.Id | Set-Content $pidFile
 Set-Content -Path $localReadyFlag -Value "ready"
 Write-Host "Bot started with PID $($process.Id)" -ForegroundColor Green

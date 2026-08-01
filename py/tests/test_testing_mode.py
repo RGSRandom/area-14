@@ -9,6 +9,11 @@ class TestTestingMode(unittest.TestCase):
         self.assertTrue(main.should_sync_user(123, {"TEST_USER_ID": "123"}))
         self.assertFalse(main.should_sync_user(999, {"TEST_USER_ID": "123"}))
 
+    def test_missing_test_mode_defaults_to_test_user_for_safety(self):
+        self.assertTrue(main.is_test_mode_enabled({"TEST_USER_ID": "123"}))
+        self.assertTrue(main.should_sync_user(123, {"TEST_USER_ID": "123"}))
+        self.assertFalse(main.should_sync_user(999, {"TEST_USER_ID": "123"}))
+
     def test_missing_test_user_raises(self):
         with self.assertRaises(ValueError):
             main.should_sync_user(123, {})
