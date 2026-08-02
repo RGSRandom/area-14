@@ -896,31 +896,45 @@ async def on_message(message):
     await bot.process_commands(message)
 
 class SupportTicketView(discord.ui.View):
-    @discord.ui.select(custom_id="support_ticket_select")
-    async def support_select(self, interaction, select):
+
+    @discord.ui.select(
+        custom_id="support_ticket_select",
+        placeholder="Select a ticket category...",
+        options=[
+            discord.SelectOption(
+                label="General Support",
+                value="general_support",
+                description="General questions or issues"
+            ),
+            discord.SelectOption(
+                label="Partnership Support",
+                value="partnership_support",
+                description="Partnership inquiries"
+            ),
+            discord.SelectOption(
+                label="In-Game Reports",
+                value="in_game_reports",
+                description="Report a player"
+            ),
+        ],
+    )
+    async def support_select(self, interaction: discord.Interaction, select: discord.ui.Select):
         selected_value = select.values[0]
-        labels = {
-            "general_support": "General Support",
-            "partnership_support": "Partnership Support",
-            "in_game_reports": "In-Game Reports",
-        }
-        selected_label = labels.get(selected_value, selected_value)
-        if selected_label == "General Support":
+
+        if selected_value == "general_support":
             await interaction.response.send_modal(GeneralSupportModal())
-            
-        elif selected_label == "Partnership Support":
+
+        elif selected_value == "partnership_support":
             await interaction.response.send_modal(PartnershipSupportModal())
 
-        elif selected_label == "In-Game Reports":
+        elif selected_value == "in_game_reports":
             await interaction.response.send_modal(InGameReportsModal())
-
-        else: 
+        else:
             await interaction.response.send_message(
                 "```⚠︎⚠︎⚠︎ ERROR. CONTACT RGSRANDOM. ⚠︎⚠︎⚠︎```.",
                 ephemeral=True,
             )
             return
-
 
 @bot.command(name='&^V1mticket')
 async def ticket_command(ctx):
