@@ -218,6 +218,9 @@ views_loaded = False
 
 @bot.event
 async def on_ready():
+    print("=== Registered Commands ===")
+    for cmd in sorted(bot.commands, key=lambda c: c.name):
+        print(cmd.name)
     global views_loaded
     print("=" * 40)
     print("READY")
@@ -462,16 +465,102 @@ async def on_member_update(before, after):
 # --- Manual `a!sync` command and concurrency guard ---
 # Track active syncs per target guild to prevent cross-source conflicts
 active_sync_targets = set()
+@bot.command(name="debug")
+async def debug(ctx):
+    if ctx.author.id not in ALLOWED_CONTROL_USER_IDS:
+        return
+    config_data = load_config()
 
+    embed = discord.Embed(
+        title="🔧 Bot Debug",
+        color=discord.Color.blue()
+    )
 
-async def perform_manual_sync(triggering_message):
-    logger.warning(f"perform_manual_sync called from message id={getattr(triggering_message, 'id', None)} channel={getattr(triggering_message, 'channel', None)}")
+    embed.add_field(
+        name="Bot",
+        value=f"{bot.user}\nID: `{bot.user.id}`",
+        inline=False
+    )
+
+    embed.add_field(
+        name="Latency",
+        value=f"{round(bot.latency * 1000)} ms",
+        inline=True
+    )
+
+    embed.add_field(
+        name="Guilds",
+        value=str(len(bot.guilds)),
+        inline=True
+    )
+
+    embed.add_field(
+        name="Users Cached",
+        value=str(len(bot.users)),
+        inline=True
+    )
+
+    embed.add_field(
+        name="Sync Enabled",
+        value="✅ Yes" if is_sync_enabled() else "❌ No",
+        inline=True
+    )
+
+    embed.add_field(
+        name="Periodic Sync",
+        value="🟢 Running" if sync_roles.is_running() else "🔴 Stopped",
+        inline=True
+    )
+
+    embed.add_field(
+        name="Test Mode",
+        value="✅ Enabled" if is_test_mode_enabled(config_data) else "❌ Disabled",
+        inline=True
+    )
+
+    embed.add_field(
+        name="Target Guild",
+        value=f"`{config_data['TARGET_GUILD_ID']}`",
+        inline=False
+    )
+
+    embed.add_field(
+        name="Source Guild(s)",
+        value="\n".join(f"`{gid}`" for gid in get_source_guild_ids(config_data)),
+        inline=False
+    )
+
+    embed.add_field(
+        name="Role Mappings",
+        value=str(len(config_data["role_mappings"])),
+        inline=True
+    )
+
+    embed.add_field(
+        name="Dangerous Permissions",
+        value=str(len(dangerous_perms.get("dangerous_permissions", []))),
+        inline=True
+    )
+
+    embed.add_field(
+        name="Python",
+        value=sys.version.split()[0],
+        inline=True
+    )
+
+    embed.set_footer(text=f"PID: {os.getpid()}")
+
+    await ctx.send(embed=embed)
+
+@bot.command(name="sync")
+async def perform_manual_sync(ctx):
+    logger.warning(f"perform_manual_sync called from message id={getattr(ctx, 'id', None)} channel={getattr(ctx, 'channel', None)}")
     """Perform a one-off sync and update a status message every 2 seconds.
     This version fetches full member lists from source and target guilds to avoid cache misses.
     """
     if not is_sync_enabled():
-        if triggering_message:
-            await triggering_message.channel.send(
+        if ctx:
+            await ctx.channel.send(
                 embed=discord.Embed(
                     title="Sync Paused",
                     description="Sync is currently paused. Use a!start first.",
@@ -492,8 +581,8 @@ async def perform_manual_sync(triggering_message):
         embed = discord.Embed(title="Error: Guilds not available",
                               description="One or more configured servers are not available to the bot. Please check the bot's permissions.",
                               color=discord.Color.red())
-        if triggering_message:
-            await triggering_message.channel.send(embed=embed)
+        if ctx:
+            await ctx.channel.send(embed=embed)
         else:
             logger.error("Startup sync: one or more configured servers are not available to the bot.")
         return
@@ -502,8 +591,8 @@ async def perform_manual_sync(triggering_message):
         embed = discord.Embed(title="Sync Already Running",
                               description="A sync is already running for the target server; cannot start another.",
                               color=discord.Color.orange())
-        if triggering_message:
-            await triggering_message.channel.send(embed=embed)
+        if ctx:
+            await ctx.channel.send(embed=embed)
         else:
             logger.warning("Startup sync: a sync is already running for the target server; skipping.")
         return
@@ -513,8 +602,8 @@ async def perform_manual_sync(triggering_message):
     embed = discord.Embed(title="Manual Sync Started",
                             description="Fetching members and syncing roles.",
                             color=discord.Color.blue())
-    if triggering_message:
-        status_msg = await triggering_message.channel.send(embed=embed)
+    if ctx:
+        status_msg = await ctx.channel.send(embed=embed)
     else:
         status_msg = None
 
@@ -529,8 +618,8 @@ async def perform_manual_sync(triggering_message):
         test_user_id = get_test_user_id(config_data)
         if test_user_id is None:
             msg = "Test mode enabled. TEST_USER_ID wasn't found in config."
-            if triggering_message:
-                await triggering_message.channel.send(msg)
+            if ctx:
+                await ctx.channel.send(msg)
             else:
                 logger.error(msg)
             return
