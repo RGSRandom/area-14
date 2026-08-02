@@ -303,7 +303,14 @@ async def sync_roles():
     target_members = target_guild.members
     synced_count = 0
     
+    
     for target_member in target_members:
+        excluded_role_ids = get_excluded_role_ids(config_data)
+        member_role_ids = {role.id for role in target_member.roles}
+
+        if member_role_ids & excluded_role_ids:
+            logger.info(f"Skipping {target_member.name} because they have an excluded role")
+            continue
         try:
             if is_test_mode_enabled(config_data) and target_member.id != test_user_id:
                 continue
@@ -721,6 +728,12 @@ async def perform_manual_sync(ctx):
         managed_target_role_ids = get_managed_target_role_ids(config_data)
 
         for target_member in target_members:
+            excluded_role_ids = get_excluded_role_ids(config_data)
+            member_role_ids = {role.id for role in target_member.roles}
+
+            if member_role_ids & excluded_role_ids:
+                logger.info(f"Skipping {target_member.name} because they have an excluded role")
+                continue
             try:
                 if not should_sync_user(target_member.id, config_data):
                     processed += 1
@@ -876,6 +889,16 @@ class GeneralSupportModal(discord.ui.Modal, title="General Support"):
             interaction.user.name.lower()
         )
 
+        embed = discord.Embed(
+            title="Ticket Error",
+            description=f"You already have this type of ticket open. #general-{safe_name}",
+            color=discord.Color.red()
+        )
+
+        if guild.get_channel(f"general-{safe_name}") is not None:
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+        
         await guild.create_text_channel(
             name=f"general-{safe_name}",
             category=category,
@@ -906,12 +929,13 @@ class PartnershipSupportModal(discord.ui.Modal, title="Partnership Support"):
         required=True)
     
     owner = discord.ui.TextInput(
-        label="Are you the owner of the group? If not, please provide the owner's username or username ID.",
+        label="Are you the group owner?",
+        placeholder = "If not, provide owner's username or ID",
         style=discord.TextStyle.short,
         required=True
     )
     async def on_submit(self, interaction: discord.Interaction):
-        STAFF_ROLE_ID = 1389925525312507924
+        STAFF_ROLE_ID = 1363831936153555195
         CATEGORY_ID = 1389925682678730782
 
         guild = interaction.guild
@@ -954,6 +978,16 @@ class PartnershipSupportModal(discord.ui.Modal, title="Partnership Support"):
             interaction.user.name.lower()
         )
 
+        embed = discord.Embed(
+            title="Ticket Error",
+            description=f"You already have this type of ticket open. #partnership-{safe_name}",
+            color=discord.Color.red()
+        )
+
+        if guild.get_channel(f"partnership-{safe_name}") is not None:
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+        
         await guild.create_text_channel(
             name=f"partnership-{safe_name}",
             category=category,
@@ -968,7 +1002,7 @@ class InGameReportsModal(discord.ui.Modal, title="In-Game Reports"):
         max_length=32
     )
     reported_user = discord.ui.TextInput(
-        label="What is the username of the user you are reporting?",
+        label="What is the username of the offender?",
         style=discord.TextStyle.short,
         required=True
     )
@@ -978,7 +1012,7 @@ class InGameReportsModal(discord.ui.Modal, title="In-Game Reports"):
         required=True,
     )
     async def on_submit(self, interaction: discord.Interaction):
-            STAFF_ROLE_ID = 1389925525312507924
+            STAFF_ROLE_ID = 1363831936153555195
             CATEGORY_ID = 1509601039412625439
 
             guild = interaction.guild
@@ -1020,11 +1054,38 @@ class InGameReportsModal(discord.ui.Modal, title="In-Game Reports"):
                 "",
                 interaction.user.name.lower()
             )
-            await guild.create_text_channel(
+
+            embed = discord.Embed(
+                title="Ticket Error",
+                description=f"You already have this type of ticket open. #report-{safe_name}",
+                color=discord.Color.red()
+            )
+
+            if guild.get_channel(f"report-{safe_name}") is not None:
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+                return
+            
+            ticket_channel = await guild.create_text_channel(
                 name=f"report-{safe_name}",
                 category=category,
                 overwrites=overwrites
             )
+
+            embed = discord.Embed(
+                title="In-Game Report",
+                description=f"Welcome. Staff will be with you shortly. In the meantime, please explain the issue thoroughly. If you wish to close the ticket, click the 🔒button.",
+                color=embed_color)
+            await ticket_channel.send(embed=embed)
+
+def get_excluded_role_ids(config_data=None):
+    if config_data is None:
+        config_data = load_config()
+    raw = config_data.get("EXCLUDED_ROLE_IDS", [])
+    if not raw:
+        return set()
+    if isinstance(raw, list):
+        return {int(r) for r in raw if r not in (None, "")}
+    return {int(raw)}
 
 class SupportTicketView(discord.ui.View):
     def __init__(self):
@@ -1034,19 +1095,19 @@ class SupportTicketView(discord.ui.View):
         placeholder="Select a ticket category...",
         options=[
             discord.SelectOption(
-                label="General Support",
+                label="⚒️  |  General Support",
                 value="general_support",
-                description="General questions or issues"
+                description="If you have any general questions or inquiries, please select this option."
             ),
             discord.SelectOption(
-                label="Partnership Support",
+                label="🤝  |  Partnership Support",
                 value="partnership_support",
-                description="Partnership inquiries"
+                description="If you wish to partnership with Area - 14 or discuss partnership collaborations, select this option."
             ),
             discord.SelectOption(
-                label="In-Game Reports",
+                label="🎮  |  In-Game Reports",
                 value="in_game_reports",
-                description="Report a player"
+                description="If you wish to report someone rule-breaking in-game, please select this option."
             ),
         ],
     )
