@@ -983,7 +983,7 @@ class GeneralSupportModal(discord.ui.Modal, title="General Support"):
 
         close_button.callback = close_callback
         view.add_item(close_button)
-        await ticket_channel.send(embeds=[embed, embed1], view=view) 
+        await ticket_channel.send(content=f"{member.mention}", embeds=[embed, embed1], view=view)
 
 
 class PartnershipSupportModal(discord.ui.Modal, title="Partnership Support"):
@@ -1129,7 +1129,7 @@ class PartnershipSupportModal(discord.ui.Modal, title="Partnership Support"):
 
         close_button.callback = close_callback
         view.add_item(close_button)
-        await ticket_channel.send(embeds=[embed, embed1], view=view)        
+        await ticket_channel.send(content=f"{member.mention}", embeds=[embed, embed1], view=view)       
 
 class InGameReportsModal(discord.ui.Modal, title="In-Game Reports"):
     roblox = discord.ui.TextInput(
@@ -1263,7 +1263,7 @@ class InGameReportsModal(discord.ui.Modal, title="In-Game Reports"):
 
             close_button.callback = close_callback
             view.add_item(close_button)
-            await ticket_channel.send(embeds=[embed, embed1], view=view)
+            await ticket_channel.send(content=f"{member.mention}", embeds=[embed, embed1], view=view)
 
 def get_excluded_role_ids(config_data=None):
     if config_data is None:
