@@ -46,6 +46,8 @@ logger = logging.getLogger(__name__)
 config_file_path = (repo_root / 'json' / 'config.json').resolve()
 dangerous_perms_path = (repo_root / 'json' / 'dangerous_perms.json').resolve()
 
+channel_log_id = 1533412186850988093
+
 # Load config files helper functions
 def load_config():
     try:
@@ -262,7 +264,7 @@ async def on_ready():
         bot.add_view(SupportTicketView())
         views_loaded = True
 
-@tasks.loop(minutes=30)
+@tasks.loop(minutes=60)
 async def sync_roles():
     """Sync roles every 30 minutes to ensure consistency"""
     if not is_sync_enabled():
@@ -329,6 +331,16 @@ async def sync_roles():
                 role = target_guild.get_role(role_id)
                 if role:
                     await target_member.remove_roles(role)
+                    channel = bot.get_channel(channel_log_id)
+
+                    embed = discord.Embed(
+                        title="🗑️  |  ROLE REMOVED",
+                        description=f"Removed role <@&{role.id}> from user <@{target_member.id}>.",
+                        color=embed_color
+                    )
+                    embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
+                    embed.set_footer(text=target_member.name, icon_url=target_member.avatar.url)
+                    await channel.send(embed=embed)
                     logger.info(f"🗑️ Sync removed '{role.name}' from {target_member.name}")
                     synced_count += 1
             
@@ -338,7 +350,18 @@ async def sync_roles():
                 role = target_guild.get_role(role_id)
                 if role:
                     await target_member.add_roles(role)
-                    logger.info(f"✅ Sync added '{role.name}' to {target_member.name}")
+                    channel = bot.get_channel(channel_log_id)
+
+                    embed = discord.Embed(
+                        title="✅  |  ROLE ADDED",
+                        description=f"Added role <@&{role.id}> to user <@{target_member.id}>.",
+                        color=embed_color
+                    )
+                    embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
+                    embed.set_footer(text=target_member.name, icon_url=target_member.avatar.url)
+
+                    await channel.send(embed=embed)
+                    logger.info(f"✅ Sync added <@&{role.id}> to {target_member.name}")
                     synced_count += 1
         
         except Exception as e:
@@ -356,7 +379,7 @@ async def on_member_update(before, after):
     logger.info(f"[DEBUG] after roles:  {sorted(after_role_ids)}")
 
     if before_role_ids == after_role_ids:
-        logger.info("[DEBUG] No role changes detected  returning")
+        logger.info("[DEBUG] No role changes detected returning")
         return  # No role changes
 
     # Load server IDs from config
@@ -427,15 +450,45 @@ async def on_member_update(before, after):
                         dangerous_found.append(perm)
 
                 if dangerous_found:
+                    channel = bot.get_channel(channel_log_id)
+
+                    embed = discord.Embed(
+                        title="🚫  |  AUTO-ROLE BLOCKED",
+                        description=f"Role <@&{target_role.id}> has dangerous permissions: {dangerous_found}. <@{after.id}>'s roles were not assigned.",
+                        color=embed_color
+                    )
+                    embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
+                    embed.set_footer(name=after.name, icon_url=after.avatar.url)
+                    await channel.send (embed=embed)
                     logger.warning(f"🚫 BLOCKED: Role '{target_role.name}' has dangerous permissions: {dangerous_found}")
                     logger.warning(f"   User {after.name} was NOT given this role. Edit dangerous_perms.json if needed.")
                     continue
 
                 logger.info(f"[DEBUG] Attempting to add role '{target_role.name}' ({target_role.id}) to user {after.id}")
                 await target_member.add_roles(target_role)
+                channel = bot.get_channel(channel_log_id)
+
+                embed = discord.Embed(
+                    title="✅  |  ROLE ADDED",
+                    description=f"Added role <@&{target_role.id}> to user <@{after.id}>.",
+                    color=embed_color
+                )
+                embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
+                embed.set_footer(text=after.name, icon_url=after.avatar.url)
+
+                await channel.send(embed=embed)
                 logger.info(f"✅ Added role '{target_role.name}' to {after.name} in target server")
 
             except Exception as e:
+                channel = bot.get_channel(channel_log_id)
+
+                embed = discord.Embed(
+                    title="🔒  |  ERROR",
+                    description=f"Error adding role for added role id {added_role_id} -> target {target_role_id}: {e}",
+                    color=embed_color
+                )
+                embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
+                embed.set_footer(text=after.name, icon_url=after.avatar.url)               
                 logger.error(f"Error adding role for added role id {added_role_id} -> target {target_role_id}: {e}", exc_info=True)
 
     # Check for roles that were removed
@@ -457,6 +510,16 @@ async def on_member_update(before, after):
 
                 logger.info(f"[DEBUG] Attempting to remove role '{target_role.name}' ({target_role.id}) from user {after.id}")
                 await target_member.remove_roles(target_role)
+                channel = bot.get_channel(channel_log_id)
+
+                embed = discord.Embed(
+                    title="🗑️  |  ROLE REMOVED",
+                    description=f"Removed role <@&{target_role.id}> from user <@{after.id}>.",
+                    color=embed_color
+                )
+                embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
+                embed.set_footer(text=after.name, icon_url=after.avatar.url)
+                await channel.send(embed=embed)
                 logger.info(f"🗑️ Removed role '{target_role.name}' from {after.name} in target server")
 
             except Exception as e:
@@ -647,7 +710,7 @@ async def perform_manual_sync(ctx):
                     await status_msg.edit(embed=embed)
                 else:
                     logger.info(f"Startup Sync: {processed}/{total_members} members - {changes} changes")
-                await asyncio.sleep(2)
+                await asyncio.sleep(0.5)
         except Exception:
             pass
 
@@ -685,6 +748,16 @@ async def perform_manual_sync(ctx):
                     role = target_guild.get_role(role_id)
                     if role:
                         await target_member.remove_roles(role)
+                        channel = bot.get_channel(channel_log_id)
+
+                        embed = discord.Embed(
+                            title="🗑️  |  ROLE REMOVED",
+                            description=f"Removed role <@&{role.id}> from user <@{target_member.id}>.",
+                            color=embed_color
+                        )
+                        embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
+                        embed.set_footer(text=target_member.name, icon_url=target_member.avatar.url)
+                        await channel.send(embed=embed)
                         logger.info(f"Removed '{role.name}' from {target_member.name}")
                         changes += 1
 
@@ -699,12 +772,32 @@ async def perform_manual_sync(ctx):
                             logger.warning(f"Blocked adding '{role.name}' due to dangerous perms")
                             continue
                         await target_member.add_roles(role)
+                        channel = bot.get_channel(channel_log_id)
+
+                        embed = discord.Embed(
+                            title=" ✅  |  ROLE ADDED",
+                            description=f"Added role <@&{role.id}> to user <@{target_member.id}>.",
+                            color=embed_color
+                        )
+                        embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
+                        embed.set_footer(text=target_member.name, icon_url=target_member.avatar.url)
+
+                        await channel.send(embed=embed)
                         logger.info(f"Added '{role.name}' to {target_member.name}")
                         changes += 1
 
                 processed += 1
 
             except Exception as e:
+                channel = bot.get_channel(channel_log_id)
+
+                embed = discord.Embed(
+                    title="🔒  |  ERROR",
+                    description=f"Error adding role for added role id {role_id} -> target {target_member.name}: {e}",
+                    color=embed_color
+                )
+                embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
+                embed.set_footer(text=target_member.name, icon_url=target_member.avatar.url) 
                 logger.error(f"Error syncing member {target_member.name}: {e}")
 
         stop_progress = True
@@ -982,6 +1075,7 @@ async def ticket_commandmain(ctx):
         description="Welcome to the support ticket system! Please select the type of support you need from the options below.",
         color=embed_color,
     )
+
     embed.add_field(name="⚒️  |  General Support", value="If you have any general questions or inquiries, please select this option.", inline=False)
     embed.add_field(name="🤝  |  Partnership Support", value="If you wish to partnership with Area - 14 or discuss partnership collaborations, select this option.", inline=False)
     embed.add_field(name="🎮  |  In-Game Reports", value="If you wish to report someone rule-breaking in-game, please select this option.", inline=False)
