@@ -1027,8 +1027,10 @@ async def on_message(message):
 
     if message.content.startswith("fuck you"):
         await message.channel.send("No, fuck you.")
-    elif message.content.startswith("no fuck you" or "No, fuck you." or "No fuck you"):
+    elif message.content.startswith(("no fuck you", "No, fuck you.", "No fuck you")):
         await message.channel.send("NO FUCK YOU.")
+
+    await bot.process_commands(message)
 
 @bot.command(name="execute")
 async def execute_user(ctx, user: discord.Member = None):
@@ -1057,6 +1059,11 @@ async def execute_user(ctx, user: discord.Member = None):
     except Exception as e:
         await ctx.send(f"❌ Unexpected error: {e}")
         print(f"Error: {e}")
+
+@bot.command(name="poll")
+async def create_poll(ctx, time: str = None):
+    if ctx.author.id not in ALLOWED_CONTROL_USER_IDS:
+        return
 
 def get_next_ticket_name(guild, prefix, username):
     safe_name = re.sub(r"[^a-z0-9-]", "", username.lower())
