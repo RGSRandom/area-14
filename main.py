@@ -873,6 +873,92 @@ async def perform_manual_sync(ctx):
 
         active_sync_targets.discard(TARGET_GUILD_ID)
 
+from discord.ext import commands
+
+SSU_BEG_CHANNEL_ID = 1363910034936955053  # ← put the target channel ID here
+
+@bot.command(name="beg")
+@commands.cooldown(1, 300, commands.BucketType.default)
+@commands.cooldown(1, 600, commands.BucketType.user)
+async def beg(ctx):
+    channel = bot.get_channel(SSU_BEG_CHANNEL_ID)
+    
+    if channel is None:
+        await ctx.send("ERROR")
+        return
+
+    embed = discord.Embed(
+        title="🚨🚨🚨 SSU Beg 🚨🚨🚨",
+        description=(
+            "🚨🚨🚨 **SSU EMERGENCY — DAY 9000** 🚨🚨🚨\n\n"
+            "hElP mE. 😭🙏\n\n"
+            "I hAvE bEeN wAiTiNg FoR aN SSU fOr So LoNg ThAt I hAvE cOmPlEtEd ThE eNtIrE **FIVE STAGES OF GRIEF** tWiCe.\n\n"
+            "😃 **DENIAL:**\n\n"
+            "\"tHeY'rE pRoBaBlY jUsT pRePaRiNg.\"\n\n"
+            "😡 **ANGER:**\n\n"
+            "\"WHO HAS THE SSU BUTTON?!?!?!\"\n\n"
+            "🤝 **BARGAINING:**\n\n"
+            "\"pLeAsE... i'Ll bE cLaSs-D... i'Ll ClEaN tHe FaCiLiTy... I'LL EVEN FOLLOW THE RULES.\"\n\n"
+            "😭 **DEPRESSION:**\n\n"
+            "*opens #announcements*\n\n"
+            "*nothing.*\n\n"
+            "*refreshes.*\n\n"
+            "*nothing.*\n\n"
+            "*refreshes again.*\n\n"
+            "**NOTHING.**\n\n"
+            "🧘 **ACCEPTANCE:**\n\n"
+            "\"I have accepted that there will never be an SSU.\"\n\n"
+            "...\n\n"
+            "**NO I HAVEN'T.** 💀💀💀\n\n"
+            "I pReSsEd F5 sO mAnY tImEs My KeYbOaRd HaS dEvElOpEd SeLf-AwArEnEsS. ⌨️🧠\n\n"
+            "I rEsTaRtEd DiScOrD.\n\n"
+            "I rEsTaRtEd RoBlOx.\n\n"
+            "I rEsTaRtEd My Pc.\n\n"
+            "I rEsTaRtEd My RoUtEr. 🔌\n\n"
+            "I uNpLuGgEd My MoNiToR. 🖥️\n\n"
+            "I aM nOw CoNfIdEnT iN mY tEcHnIcAl AbIlItIeS.\n\n"
+            "I cAn FiX tHe InTeRnEt.\n\n"
+            "I cAn FiX tHe RoUtEr.\n\n"
+            "I cAn FiX tHe FaCiLiTy.\n\n"
+            "**BUT I CANNOT FIX THE LACK OF AN SSU.** 😭😭😭\n\n"
+            "I wEnT oUtSiDe. 🌳\n\n"
+            "I tOuChEd GrAsS. 🌱\n\n"
+            "I sAw A bIrD. 🐦\n\n"
+            "I aSkEd It WhEn ThE nExT SSU wAs.\n\n"
+            "iT fLeW aWaY.\n\n"
+            "**EVEN THE BIRD KNOWS.** 😭\n\n"
+            "I tRiEd TaLkInG tO rEaL pEoPlE.\n\n"
+            "\"wHaT aRe YoU dOiNg?\"\n\n"
+            "\"wAiTiNg FoR aN SSU.\"\n\n"
+            "tHeY hAvE nOt ReTuRnEd. 💀\n\n"
+            "eVeRy DiScOrD pInG iS nOw A pSyChOlOgIcAl EvEnT. 🔔\n\n"
+            "**SSU?!?!?!**\n\n"
+            "nO.\n\n"
+            "sOmEoNe PoStEd \"gm.\"\n\n"
+            "I hAvE bEeN rUiNeD. 😭\n\n"
+            "SSUHs...\n\n"
+            "I kNoW yOu'Re ThErE.\n\n"
+            "I kNoW yOu CaN sEe ThIs.\n\n"
+            "I kNoW tHe **START SERVER** bUtToN eXiStS.\n\n"
+            "pLeAsE...\n\n"
+            "🙏😭🙏😭🙏😭🙏😭🙏\n\n"
+            "**P R E S S   I T .**\n\n"
+            "🚨🚨🚨 **START THE SSU** 🚨🚨🚨\n\n"
+            "**I BEG YOUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUU** 😭😭😭😭😭"
+        ),
+        color=discord.Color.green()
+    )
+
+    await ctx.message.add_reaction("✅")
+    await channel.send(content=ctx.author.mention, embed=embed)
+
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandOnCooldown):
+        await ctx.send(f"Denied.")
+    else:
+        raise error
+
 TICKET_CATEGORY_IDS = {
     1389925525312507924,  # general
     1389925682678730782,  # partnership
@@ -1153,7 +1239,7 @@ class SSUPollView(discord.ui.View):
 
         embed = discord.Embed(
             title="Server Start Up",
-            description=f"{interaction.user.mention} is hosting an SSU. The mode for this SSU is **{mode}**. Please follow all regulations found [here](https://discord.com/channels/1297640433878433792/1300133402636320869) and enjoy your time on-site!",
+            description=f"{interaction.user.mention} is hosting an SSU. The mode for this SSU is **{mode}**. Please follow all regulations found [here](https://discord.com/channels/1297640433878433792/1300133402636320869) and enjoy your time on-site!\n\nRequest mod permissions ⁠at https://discord.com/channels/1297640433878433792/1300134062819639411\n\nRequest Morphing Services at https://discord.com/channels/1297640433878433792/1300134126955003904\n\nYou may not be modded or morphed during an event\n\nDon't forget to join our group and request roles to automatically get modded when you join!\n\n<@&1300135059357175890> your event cooldown will be 20-35 up to 1 hour per event. Use https://discord.com/channels/1297640433878433792/1508112776307019916 ",
             color=embed_color
         )
         embed.add_field(name=mode, value=mode_description, inline=False)
