@@ -20,7 +20,10 @@ jobs:
           if [ -f requirements.txt ]; then
             python -m pip install -r requirements.txt
           fi
+          pip install gspread
 
-      - run: echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" >> .env
+      - run: |
+          echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" >> .env
+          echo '${{ secrets.GCP_CREDENTIALS }}' > CREDENTIALS.json
 
       - run: python main.py
