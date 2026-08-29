@@ -11,7 +11,9 @@ import sys
 import asyncio
 import re
 import chat_exporter
-from datetime import timedelta
+from datetime import datetime, timedelta
+import gspread
+from google.oauth2.service_account import Credentials
 
 script_path = Path(__file__).resolve()
 repo_root = script_path.parent if script_path.parent.name.lower() != "py" else script_path.parent.parent
@@ -54,6 +56,21 @@ channel_log_id = 1533412186850988093
 channel_log_ticket = 1533516881305145435
 
 active_ticket_creations = set()
+
+import json
+from pathlib import Path
+
+PUNISHMENTS_FILE = Path("json/punishments.json")
+
+def load_punishments():
+    if not PUNISHMENTS_FILE.exists():
+        return []
+    with open(PUNISHMENTS_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def save_punishments(data):
+    with open(PUNISHMENTS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4)
 
 # Load config files helper functions
 def load_config():
@@ -877,6 +894,8 @@ from discord.ext import commands
 
 SSU_BEG_CHANNEL_ID = 1363910034936955053  # ← put the target channel ID here
 
+import random  # make sure this is at the top of your file
+
 @bot.command(name="beg")
 @commands.cooldown(1, 300, commands.BucketType.default)
 @commands.cooldown(1, 600, commands.BucketType.user)
@@ -949,13 +968,308 @@ async def beg(ctx):
         color=discord.Color.green()
     )
 
+    ROLE_1_IN_100 = 1300127296476151909     
+    ROLE_1_IN_10000 = 1417497758130245752   
+    ROLE_1_IN_1000000 = 1398431646520311809  
+
+    content = ctx.author.mention
+
+    roll = random.randint(1, 1000000)
+
+    if roll == 1:  # 1 in 1,000,000
+        content += f"Lucky roll! 1 in 1000000 (0.0001%!) <@&{ROLE_1_IN_1000000}> Pinging poverty toilet!"
+    elif roll <= 100:  # 1 in 10,000
+        content += f"Lucky roll! 1 in 10000 (0.0099%!) <@&{ROLE_1_IN_10000}> Pinging General Staff!"
+    elif roll <= 10000:  # 1 in 100
+        content += f"Lucky roll! 1 in 100 (0.99%!) <@&{ROLE_1_IN_100}> Pinging SSUT!"
+
+    print(roll)
+
     await ctx.message.add_reaction("✅")
-    await channel.send(content=ctx.author.mention, embed=embed)
+    await channel.send(content=content, embed=embed)
+
+PUNISH_CHANNEL_ID = 1478069999410217010
+
+SERVICE_ACCOUNT_FILE = "CREDENTIALS.json"
+
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+]
+
+creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+gc = gspread.authorize(creds)
+
+SPREADSHEET_KEY = "18_otfKSSCYRFf87R3Rmo3oQT3QvcYV_2_l0MepQKZlY"
+
+import random
+import string
+
+def generate_punishment_id():
+    date_part = datetime.now().strftime("%y%m%d")
+    random_part = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
+    return f"PUN-{date_part}-{random_part}"
+
+@bot.command(name="punish")
+async def punish(ctx, query: str, punishment_type: str, appealable: str, *, full: str = None):
+    channel = bot.get_channel(PUNISH_CHANNEL_ID)
+    
+    if channel is None:
+        await ctx.send("ERROR")
+        return
+
+    try:
+        sheet = gc.open_by_key(SPREADSHEET_KEY).worksheet("Infractions Database")
+
+        cell = sheet.find(query, in_column=3)
+        row = cell.row
+        name = sheet.cell(row, 4).value
+
+        punishment_type = punishment_type.lower()
+        appealable = appealable.lower()
+
+        if full is None:
+            await ctx.send("Please provide a reason.")
+            return
+
+        if "|" in full:
+            reason, proof = full.split("|", 1)
+            reason = reason.strip()
+            proof = proof.strip()
+        else:
+            reason = full.strip()
+            proof = None
+
+        attachments = ctx.message.attachments
+        if attachments:
+            attachment_links = "\n".join(a.url for a in attachments)
+            if proof:
+                proof = f"{proof}\n{attachment_links}"
+            else:
+                proof = attachment_links
+
+        if not proof:
+            await ctx.send("Proof is required to punish a faction. The punishment was not applied.")
+            return
+
+        # Generate ID
+        punishment_id = generate_punishment_id()
+
+        # Apply punishment on sheet
+        if punishment_type in ("warning", "w"):
+            current = sheet.cell(row, 7).value
+            if current in (None, "", " "):
+                next_punishment = "Warning-1"
+            elif current == "Warning-1":
+                next_punishment = "Warning-2"
+            elif current == "Warning-2":
+                next_punishment = "Warning-3"
+            else:
+                next_punishment = "Warning-3"
+            sheet.update_cell(row, 7, next_punishment)
+
+        elif punishment_type in ("strike", "s"):
+            current = sheet.cell(row, 6).value
+            if current in (None, "", " "):
+                next_punishment = "Strike-1"
+            elif current == "Strike-1":
+                next_punishment = "Strike-2"
+            elif current == "Strike-2":
+                next_punishment = "Strike-3"
+            else:
+                next_punishment = "Strike-3"
+            sheet.update_cell(row, 6, next_punishment)
+        else:
+            await ctx.send("Invalid punishment type. Use `warning`/`w` or `strike`/`s`.")
+            return
+
+        # Find role to ping
+        ping_role = None
+        for role in ctx.guild.roles:
+            if role.name.startswith(query) or role.name.startswith(f"[{query}]"):
+                ping_role = role
+                break
+        content = ping_role.mention if ping_role else None
+
+        # ===== Send embed FIRST to get message ID =====
+        await ctx.message.add_reaction("✅")
+
+        embed = discord.Embed(title="Punishment Infraction", color=discord.Color.red())
+        embed.add_field(name="Faction Name", value=name, inline=False)
+        embed.add_field(name="Reason", value=reason, inline=False)
+        embed.add_field(name="Punishment", value=next_punishment, inline=True)
+        embed.add_field(name="Appealable", value=appealable.capitalize(), inline=True)
+        embed.add_field(name="Status", value="Active", inline=True)
+
+        if appealable in ("yes", "y"):
+            embed.add_field(name="Appeal Method", value="HC+ open a appeal ticket.", inline=False)
+
+        embed.add_field(name="Proof", value=proof, inline=False)
+        embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
+        embed.set_footer(text=f"Punished by {ctx.author} | Punishment ID: {punishment_id}", icon_url=ctx.author.display_avatar.url)
+
+        # Catch the sent message in a variable
+        punish_msg = await channel.send(content=content, embed=embed)
+
+        if attachments:
+            files = [await a.to_file() for a in attachments]
+            await channel.send(files=files)
+
+        # ===== Save to JSON (Moved down to include message ID) =====
+        punishments = load_punishments()
+
+        log_entry = {
+            "punishment_id": punishment_id,
+            "message_id": punish_msg.id,           # ← NEW: Save message ID
+            "faction_id": query,
+            "faction_name": name,
+            "punishment": next_punishment,
+            "reason": reason,
+            "proof": proof,
+            "appealable": appealable in ("yes", "y"),
+            "status": "active",
+            "punished_by": str(ctx.author),
+            "punished_by_id": ctx.author.id,
+            "timestamp": datetime.now().isoformat()
+        }
+
+        punishments.append(log_entry)
+        save_punishments(punishments)
+
+    except Exception as e:
+        await ctx.send(f"Error: `{e}`")
+
+def get_highest_punishment(punishments, faction_id, ptype):
+    """Returns the highest active Warning or Strike for a faction"""
+    levels = []
+    for entry in punishments:
+        if entry["faction_id"] != faction_id:
+            continue
+        if entry["status"] != "active":
+            continue
+        if ptype == "warning" and "Warning" in entry["punishment"]:
+            levels.append(entry["punishment"])
+        elif ptype == "strike" and "Strike" in entry["punishment"]:
+            levels.append(entry["punishment"])
+
+    if not levels:
+        return ""
+
+    levels.sort(reverse=True)
+    return levels[0]
+
+
+@bot.command(name="appeal")
+async def appeal(ctx, punishment_id: str):
+    punishments = load_punishments()
+    found = None
+
+    for entry in punishments:
+        if entry["punishment_id"] == punishment_id:
+            # Check appeal status immediately upon finding the ID
+            if entry.get("appealable") == False:
+                await ctx.send("This punishment is unappealable.")
+                return  # Instantly stops the command
+            
+            # If it passes the check, mark it as found and appealed
+            entry["status"] = "appealed"
+            found = entry
+            break
+
+    # If the loop finishes and 'found' is still None, the ID doesn't exist
+    if not found:
+        await ctx.send("Punishment ID not found.")
+        return
+
+    save_punishments(punishments)
+
+    # ===== Recalculate and update Google Sheet =====
+    try:
+        sheet = gc.open_by_key(SPREADSHEET_KEY).worksheet("Infractions Database")
+        cell = sheet.find(found["faction_id"], in_column=3)
+        row = cell.row
+
+        highest_warning = get_highest_punishment(punishments, found["faction_id"], "warning")
+        highest_strike = get_highest_punishment(punishments, found["faction_id"], "strike")
+
+        sheet.update_cell(row, 7, highest_warning) 
+        sheet.update_cell(row, 6, highest_strike)  
+
+        sheet.update_note(f"G{row}", f"Last appealed: {punishment_id}" if highest_warning else "")
+        sheet.update_note(f"F{row}", f"Last appealed: {punishment_id}" if highest_strike else "")
+
+    except Exception as e:
+        await ctx.send(f"JSON updated but failed to update sheet: `{e}`")
+        return
+
+    await ctx.send(f"Punishment `{punishment_id}` marked as **Appealed**.")
+
+    # ===== NEW: Reply to original punishment message =====
+    channel = bot.get_channel(PUNISH_CHANNEL_ID)
+    msg_id = found.get("message_id")
+    
+    if channel and msg_id:
+        try:
+            original_msg = await channel.fetch_message(msg_id)
+            await original_msg.reply(f"Punishment **appealed**.")
+        except discord.NotFound:
+            pass # The message was deleted from the channel
+
+
+@bot.command(name="revoke")
+async def revoke(ctx, punishment_id: str):
+    punishments = load_punishments()
+    found = None
+
+    for entry in punishments:
+        if entry["punishment_id"] == punishment_id:
+            entry["status"] = "REVOKED"
+            found = entry
+            break
+
+    if not found:
+        await ctx.send("Punishment ID not found.")
+        return
+
+    save_punishments(punishments)
+
+    # ===== Recalculate and update Google Sheet =====
+    try:
+        sheet = gc.open_by_key(SPREADSHEET_KEY).worksheet("Infractions Database")
+        cell = sheet.find(found["faction_id"], in_column=3)
+        row = cell.row
+
+        highest_warning = get_highest_punishment(punishments, found["faction_id"], "warning")
+        highest_strike = get_highest_punishment(punishments, found["faction_id"], "strike")
+
+        sheet.update_cell(row, 7, highest_warning)
+        sheet.update_cell(row, 6, highest_strike)
+
+        sheet.update_note(f"G{row}", f"Last revoked: {punishment_id}" if highest_warning else "")
+        sheet.update_note(f"F{row}", f"Last revoked: {punishment_id}" if highest_strike else "")
+
+    except Exception as e:
+        await ctx.send(f"JSON updated but failed to update sheet: `{e}`")
+        return
+
+    await ctx.send(f"Punishment `{punishment_id}` marked as **REVOKED**.\nSheet updated to highest remaining active punishments.")
+
+    # ===== NEW: Reply to original punishment message =====
+    channel = bot.get_channel(PUNISH_CHANNEL_ID)
+    msg_id = found.get("message_id")
+    
+    if channel and msg_id:
+        try:
+            original_msg = await channel.fetch_message(msg_id)
+            await original_msg.reply(f"**REVOKED.**")
+        except discord.NotFound:
+            pass # The message was deleted from the channel
+
 
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandOnCooldown):
-        await ctx.send(f"Denied.")
+        return
     else:
         raise error
 
@@ -1146,11 +1460,63 @@ async def execute_user(ctx, user: discord.Member = None):
     )
 
     try:
-        await user.timeout(timedelta(days=28), reason="EXECUTED.")
+        await user.timeout(timedelta(days=27), reason="EXECUTED.")
         await ctx.send(embed=embed)
         print(f"Successfully timed out {user}")
     except discord.Forbidden:
-        await ctx.send("❌ I don't have permission to timeout that user.\nMake sure:\n- Bot has **Moderate Members**\n- Bot role is **higher** than the target’s highest role")
+        await ctx.send("No perms :(")
+    except discord.HTTPException as e:
+        await ctx.send(f"❌ Discord error: {e}")
+    except Exception as e:
+        await ctx.send(f"❌ Unexpected error: {e}")
+        print(f"Error: {e}")
+
+@bot.command(name="heal")
+async def execute_user(ctx, user: discord.Member = None):
+    if ctx.author.id not in ALLOWED_CONTROL_USER_IDS:
+        print("Wtf?")
+        return
+
+    if user is None:
+        await ctx.send("No")
+        return
+
+    embed = discord.Embed(
+        title="HEALED",
+        description=f"❤️❤️❤️❤️❤️❤️ HEALED {user.mention} ❤️❤️❤️❤️❤️❤️",
+        color=discord.Color.green()
+    )
+
+    try:
+        await user.timeout(None, reason="Healed.")
+        await ctx.send(embed=embed)
+        print(f"Successfully removed timeout from {user}")
+    except discord.Forbidden:
+        await ctx.send("No perms :(")
+    except discord.HTTPException as e:
+        await ctx.send(f"❌ Discord error: {e}")
+    except Exception as e:
+        await ctx.send(f"❌ Unexpected error: {e}")
+        print(f"Error: {e}")
+
+@bot.command(name="tellhim")
+async def execute_user(ctx, user: discord.Member = None):
+    if ctx.author.id not in ALLOWED_CONTROL_USER_IDS:
+        print("Wtf?")
+        return
+
+    if user is None:
+        await ctx.send("No")
+        return
+
+    embed = discord.Embed(
+        title="Hi, fuck you",
+        description=f"Fuck you {user}",
+        color=discord.Color.blurple()
+    )
+
+    try:
+        await ctx.send(content=f"<@{user.id}>", embed=embed)
     except discord.HTTPException as e:
         await ctx.send(f"❌ Discord error: {e}")
     except Exception as e:
