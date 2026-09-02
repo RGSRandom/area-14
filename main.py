@@ -454,7 +454,7 @@ async def on_member_update(before, after):
 
     # Only trigger if this happened in one of the configured source servers
     if after.guild.id not in source_guild_ids:
-        logger.info(f"[DEBUG] Event guild {after.guild.id} not in configured source guilds — ignoring")
+        logger.info(f"[DEBUG] Event guild {after.guild.id} not in configured source guilds - ignoring")
         return
 
     # Get target guild
@@ -914,7 +914,7 @@ async def beg(ctx):
     embed = discord.Embed(
         title="🚨🚨🚨 SSU Beg 🚨🚨🚨",
         description=(
-            "🚨🚨🚨 **SSU EMERGENCY — DAY 9000** 🚨🚨🚨\n\n"
+            "🚨🚨🚨 **SSU EMERGENCY - DAY 9000** 🚨🚨🚨\n\n"
             "hElP mE. 😭🙏\n\n"
             "I hAvE bEeN wAiTiNg FoR aN SSU fOr So LoNg ThAt I hAvE cOmPlEtEd ThE eNtIrE **FIVE STAGES OF GRIEF** tWiCe.\n\n"
             "😃 **DENIAL:**\n\n"
@@ -3286,7 +3286,7 @@ class AppealSupportModal(discord.ui.Modal, title="Faction Appeals"):
 
             # Punishment info embed
             embed2 = discord.Embed(
-                title=f"Punishment Info — `{self.punishment_id.value}`",
+                title=f"Punishment Info - `{self.punishment_id.value}`",
                 color=embed_color
             )
             embed2.add_field(name="Faction Name", value=found.get("faction_name", "N/A"), inline=True)
@@ -3428,7 +3428,7 @@ class StaffTicketView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
     @discord.ui.select(
-        custom_id="support_ticket_select",
+        custom_id="staff_ticket_select",
         placeholder="Select a ticket category...",
         options=[
             discord.SelectOption(
@@ -3490,7 +3490,7 @@ async def ticket_commandmain(ctx):
     msg = await ctx.send(embed=embed, view=SupportTicketView())
 
 @bot.command(name='&^V2hticket')
-async def ticket_commandmain(ctx):
+async def ticket_commandhub(ctx):
     embed = discord.Embed(
         title="⚒️ | Support Ticket",
         description="**Welcome to the support ticket system! Please select the type of support you need from the options below.**",
