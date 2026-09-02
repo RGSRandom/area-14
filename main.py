@@ -1198,7 +1198,7 @@ class ApprovalView(View):
             f"Punishment `{found['punishment_id']}` has been **denied**.", ephemeral=True
         )
 
-PUNISH_CHANNEL_ID = 1478069999410217010
+PUNISH_CHANNEL_ID = 1346160132647551029
 
 ACCEPT_CHANNEL_ID=1478069999410217010
 
