@@ -1,3 +1,5 @@
 discord.py==2.7.1
 python-dotenv==1.0.0
 chat-exporter==2.8.1
+gspread
+google-auth
