@@ -19,6 +19,10 @@ class AdminCog(commands.Cog):
     async def dm(self, ctx, user: commands.UserConverter, *, message: str = None):
         await main.dm_user(ctx, user, message)
 
+    @commands.command(name="uinfo")
+    async def uinfo(self, ctx, user_id: str):
+        await main.show_user_info(ctx, user_id)
+
 
 async def setup(bot):
     await bot.add_cog(AdminCog(bot))

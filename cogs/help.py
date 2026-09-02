@@ -12,6 +12,8 @@ class HelpCog(commands.Cog):
     async def help(self, ctx):
         prefix = self.bot.command_prefix
         lines = [f"`{prefix}help` - Show this message"]
+        lines.append(f"`{prefix}credits` - Show project credits")
+        lines.append(f"`{prefix}uinfo <userid>` - Show a member's information and roles")
         lines.append(f"`{prefix}avatar [user]` - Show a user's avatar")
 
         if ctx.guild and ctx.author.guild_permissions.manage_messages:
@@ -45,6 +47,16 @@ class HelpCog(commands.Cog):
                 "I could not send you a DM. Please enable direct messages from server members.",
                 delete_after=5,
             )
+
+    @commands.command(name="credits")
+    async def credits(self, ctx):
+        description = (
+            "**Lead Developer:** RGSRandom\n"
+            "**Assistant Developer:** Cipher\n\n"
+         
+        )
+        embed = info_embed("Credits", description, requested_by=ctx.author)
+        await ctx.send(embed=embed)
 
 
 async def setup(bot):

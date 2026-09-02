@@ -8,8 +8,8 @@ class PunishmentsCog(commands.Cog):
         self.bot = bot
 
     @commands.command(name="punish")
-    async def punish(self, ctx, query: str, punishment_type: str, appealable: str, *, full: str = None):
-        await main.punish(ctx, query, punishment_type, appealable, full=full)
+    async def punish(self, ctx):
+        await main.start_punishment_form(ctx)
 
     @commands.command(name="show")
     async def show(self, ctx, punishment_id: str = None):
