@@ -12,8 +12,13 @@ import asyncio
 import re
 import chat_exporter
 from datetime import datetime, timedelta
-import gspread
-from google.oauth2.service_account import Credentials
+from embed_template import create_embed, error_embed, info_embed, success_embed
+try:
+    import gspread
+    from google.oauth2.service_account import Credentials
+except ImportError:
+    gspread = None
+    Credentials = None
 from discord.ui import View, Button
 
 script_path = Path(__file__).resolve()
@@ -193,6 +198,17 @@ def get_test_user_id(config_data=None):
     return int(test_user_id)
 
 
+def get_config_user_ids(config_data, key):
+    raw_user_ids = config_data.get(key, [])
+    if not isinstance(raw_user_ids, list):
+        raw_user_ids = [raw_user_ids]
+    return {
+        int(user_id)
+        for user_id in raw_user_ids
+        if user_id not in (None, "")
+    }
+
+
 def is_test_mode_enabled(config_data=None):
     if config_data is None:
         config_data = load_config()
@@ -213,12 +229,24 @@ def should_sync_user(user_id, config_data=None):
     return user_id == test_user_id
 
 
-ALLOWED_CONTROL_USER_IDS = {1020581214077333525, 1241045030274203659, 806127882006167623}
+ALLOWED_CONTROL_USER_IDS = get_config_user_ids(config, "CONTROL_USER_IDS")
 _sync_enabled = True
 
 
 def is_controlled_user(user_id):
     return user_id in ALLOWED_CONTROL_USER_IDS
+
+
+def is_allowed_ticket_staff(user_id, config_data=None):
+    if config_data is None:
+        config_data = load_config()
+    return user_id in get_config_user_ids(config_data, "ALLOWED_TICKET_STAFF_IDS")
+
+
+def is_allowed_ssu_staff(user_id, config_data=None):
+    if config_data is None:
+        config_data = load_config()
+    return user_id in get_config_user_ids(config_data, "ALLOWED_SSU_STAFF_IDS")
 
 
 def is_sync_enabled():
@@ -598,16 +626,12 @@ async def on_member_update(before, after):
 # --- Manual `a!sync` command and concurrency guard ---
 # Track active syncs per target guild to prevent cross-source conflicts
 active_sync_targets = set()
-@bot.command(name="debug")
 async def debug(ctx):
     if ctx.author.id not in ALLOWED_CONTROL_USER_IDS:
         return
     config_data = load_config()
 
-    embed = discord.Embed(
-        title="🔧 Bot Debug",
-        color=discord.Color.blue()
-    )
+    embed = info_embed("Bot Status", requested_by=ctx.author)
 
     embed.add_field(
         name="Bot",
@@ -635,19 +659,19 @@ async def debug(ctx):
 
     embed.add_field(
         name="Sync Enabled",
-        value="✅ Yes" if is_sync_enabled() else "❌ No",
+        value="Enabled" if is_sync_enabled() else "Disabled",
         inline=True
     )
 
     embed.add_field(
         name="Periodic Sync",
-        value="🟢 Running" if sync_roles.is_running() else "🔴 Stopped",
+        value="Running" if sync_roles.is_running() else "Stopped",
         inline=True
     )
 
     embed.add_field(
         name="Test Mode",
-        value="✅ Enabled" if is_test_mode_enabled(config_data) else "❌ Disabled",
+        value="Enabled" if is_test_mode_enabled(config_data) else "Disabled",
         inline=True
     )
 
@@ -681,11 +705,10 @@ async def debug(ctx):
         inline=True
     )
 
-    embed.set_footer(text=f"PID: {os.getpid()}")
+    embed.set_footer(text=f"Area - 14 | PID: {os.getpid()}")
 
     await ctx.send(embed=embed)
 
-@bot.command(name="sync")
 async def perform_manual_sync(ctx):
     if not is_sync_enabled():
         if ctx:
@@ -901,9 +924,6 @@ SSU_BEG_CHANNEL_ID = 1363910034936955053  # ← put the target channel ID here
 
 import random  # make sure this is at the top of your file
 
-@bot.command(name="beg")
-@commands.cooldown(1, 300, commands.BucketType.default)
-@commands.cooldown(1, 600, commands.BucketType.user)
 async def beg(ctx):
     channel = bot.get_channel(SSU_BEG_CHANNEL_ID)
     
@@ -1002,8 +1022,20 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive"
 ]
 
-creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-gc = gspread.authorize(creds)
+gc = None
+if gspread is not None and Credentials is not None:
+    try:
+        creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+        gc = gspread.authorize(creds)
+    except (OSError, ValueError) as exc:
+        logger.warning(
+            "Google Sheets integration disabled; punishment commands are unavailable: %s",
+            exc,
+        )
+else:
+    logger.warning(
+        "Google Sheets integration disabled; install gspread and google-auth to enable punishment commands"
+    )
 
 SPREADSHEET_KEY = "18_otfKSSCYRFf87R3Rmo3oQT3QvcYV_2_l0MepQKZlY"
 
@@ -1170,7 +1202,6 @@ PUNISH_CHANNEL_ID = 1478069999410217010
 
 ACCEPT_CHANNEL_ID=1478069999410217010
 
-@bot.command(name="punish")
 async def punish(ctx, query: str, punishment_type: str, appealable: str, *, full: str = None):
     # 1. Role checks
     fm_role = 1346192810998501396
@@ -1414,7 +1445,6 @@ def get_highest_punishment(punishments, faction_id, ptype):
         return ""
     return f"{'Warning' if ptype == 'warning' else 'Strike'}-{max(levels)}"
 
-@bot.command(name="show")
 async def show_punishment(ctx, punishment_id: str = None):
     # Delete the trigger message
     try:
@@ -1445,10 +1475,7 @@ async def show_punishment(ctx, punishment_id: str = None):
         await ctx.send(f"Punishment ID `{punishment_id}` not found.", delete_after=5)
         return
 
-    embed = discord.Embed(
-        title=f"Showing punishment information for `{punishment_id}`",
-        color=embed_color
-    )
+    embed = info_embed(f"Punishment Details: {punishment_id}", requested_by=ctx.author)
     embed.add_field(name="Faction Name", value=found.get("faction_name", "N/A"), inline=True)
     embed.add_field(name="Punishment", value=found.get("punishment", "N/A"), inline=True)
     embed.add_field(name="Appealable", value="Yes" if found.get("appealable") else "No", inline=True)
@@ -1459,7 +1486,6 @@ async def show_punishment(ctx, punishment_id: str = None):
 
     await ctx.send(embed=embed)
 
-@bot.command(name="appeal")
 async def appeal(ctx, punishment_id: str):
     # ===== Role check =====
     fm_role = 1346192810998501396
@@ -1520,7 +1546,6 @@ async def appeal(ctx, punishment_id: str):
             pass
 
 
-@bot.command(name="revoke")
 async def revoke(ctx, punishment_id: str):
     # ===== Role check =====
     fm_role = 1346192810998501396
@@ -1613,49 +1638,50 @@ def is_ticket_channel(channel: discord.abc.GuildChannel) -> bool:
     return name.startswith(("general-", "partnership-", "report-"))
 
 
-@bot.command(name="add")
 async def add_to_ticket(ctx, user: discord.Member = None):
+    if ctx.author.id not in get_config_user_ids(load_config(), "ALLOWED_TICKET_STAFF_IDS"):
+        await ctx.send(
+            embed=error_embed(
+                "Permission Denied",
+                "Only approved ticket staff can use this command.",
+                requested_by=ctx.author,
+            )
+        )
+        return
+
     if not is_ticket_channel(ctx.channel):
-        embed = discord.Embed(
+        embed = error_embed(
             title="Not a Ticket Channel",
             description="This command can only be used in ticket channels.",
-            color=embed_color
+            requested_by=ctx.author,
         )
-        embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
-        embed.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
         await ctx.send(embed=embed)
         return
 
     if user is None:
-        embed = discord.Embed(
+        embed = error_embed(
             title="Wrong Usage!",
             description="Usage: `a!add @user` or `a!add USER_ID`",
-            color=embed_color
+            requested_by=ctx.author,
         )
-        embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
-        embed.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])        
         await ctx.send(embed=embed)
         return
 
     if user.bot:
-        embed = discord.Embed(
+        embed = error_embed(
             title="Cannot Add Bot",
             description="You cannot add a bot to a ticket.",
-            color=embed_color
+            requested_by=ctx.author,
         )
-        embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
-        embed.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
         await ctx.send(embed=embed)
         return
 
     if user in ctx.channel.members and ctx.channel.permissions_for(user).view_channel:
-        embed = discord.Embed(
+        embed = info_embed(
             title="User Already Has Access",
             description=f"{user.mention} already has access to this ticket.",
-            color=discord.Color.green()
+            requested_by=ctx.author,
         )
-        embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
-        embed.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
         await ctx.send(embed=embed)
         return
 
@@ -1668,59 +1694,58 @@ async def add_to_ticket(ctx, user: discord.Member = None):
         await ctx.send(f"Failed to add user: {e}")
         return
 
-    embed = discord.Embed(
+    embed = success_embed(
         title="User Added",
         description=f"{user.mention} was added to this ticket by {ctx.author.mention}.",
-        color=embed_color,
+        requested_by=ctx.author,
     )
-    embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
-    embed.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
     await ctx.send(embed=embed)
 
-@bot.command(name="remove")
 async def remove_from_ticket(ctx, user: discord.Member = None):
+    if ctx.author.id not in get_config_user_ids(load_config(), "ALLOWED_TICKET_STAFF_IDS"):
+        await ctx.send(
+            embed=error_embed(
+                "Permission Denied",
+                "Only approved ticket staff can use this command.",
+                requested_by=ctx.author,
+            )
+        )
+        return
+
     if not is_ticket_channel(ctx.channel):
-        embed = discord.Embed(
+        embed = error_embed(
             title="Not a Ticket Channel",
             description="This command can only be used in ticket channels.",
-            color=embed_color
+            requested_by=ctx.author,
         )
-        embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
-        embed.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
         await ctx.send(embed=embed)
         return
 
     if user is None:
-        embed = discord.Embed(
+        embed = error_embed(
             title="Wrong Usage!",
             description="Usage: `a!remove @user` or `a!remove USER_ID`",
-            color=embed_color
+            requested_by=ctx.author,
         )
-        embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
-        embed.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
         await ctx.send(embed=embed)
         return
 
     if user.bot:
-        embed = discord.Embed(
+        embed = error_embed(
             title="Cannot Remove Bot",
             description="You cannot remove a bot from a ticket.",
-            color=embed_color
+            requested_by=ctx.author,
         )
-        embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
-        embed.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
         await ctx.send(embed=embed)
         return
 
     # Check if the user actually has access
     if not ctx.channel.permissions_for(user).view_channel:
-        embed = discord.Embed(
+        embed = error_embed(
             title="User Does Not Have Access",
             description=f"{user.mention} does not have access to this ticket.",
-            color=embed_color
+            requested_by=ctx.author,
         )
-        embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
-        embed.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
         await ctx.send(embed=embed)
         return
 
@@ -1733,13 +1758,11 @@ async def remove_from_ticket(ctx, user: discord.Member = None):
         await ctx.send(f"Failed to remove user: {e}")
         return
 
-    embed = discord.Embed(
+    embed = success_embed(
         title="User Removed",
         description=f"{user.mention} was removed from this ticket by {ctx.author.mention}.",
-        color=embed_color,
+        requested_by=ctx.author,
     )
-    embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
-    embed.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
     await ctx.send(embed=embed)
 
 
@@ -1755,8 +1778,7 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-@bot.command(name="execute")
-async def execute_user(ctx, user: discord.Member = None):
+async def execute_member(ctx, user: discord.Member = None):
     if ctx.author.id not in ALLOWED_CONTROL_USER_IDS:
         print("Wtf?")
         return
@@ -1783,8 +1805,7 @@ async def execute_user(ctx, user: discord.Member = None):
         await ctx.send(f"❌ Unexpected error: {e}")
         print(f"Error: {e}")
 
-@bot.command(name="heal")
-async def execute_user(ctx, user: discord.Member = None):
+async def heal_member(ctx, user: discord.Member = None):
     if ctx.author.id not in ALLOWED_CONTROL_USER_IDS:
         print("Wtf?")
         return
@@ -1811,8 +1832,7 @@ async def execute_user(ctx, user: discord.Member = None):
         await ctx.send(f"❌ Unexpected error: {e}")
         print(f"Error: {e}")
 
-@bot.command(name="tellhim")
-async def execute_user(ctx, user: discord.Member = None):
+async def tell_user(ctx, user: discord.Member = None):
     if ctx.author.id not in ALLOWED_CONTROL_USER_IDS:
         print("Wtf?")
         return
@@ -1835,20 +1855,156 @@ async def execute_user(ctx, user: discord.Member = None):
         await ctx.send(f"❌ Unexpected error: {e}")
         print(f"Error: {e}")
 
+
+async def show_avatar(ctx, user: discord.User = None):
+    if user is None:
+        user = ctx.author
+
+    embed = info_embed(
+        f"{user.display_name}'s Avatar",
+        f"[Open full-size avatar]({user.display_avatar.url})",
+        requested_by=ctx.author,
+    )
+    embed.set_image(url=user.display_avatar.url)
+    await ctx.send(embed=embed)
+
+
+async def pin_replied_message(ctx):
+    if not ctx.guild or not ctx.author.guild_permissions.manage_messages:
+        await ctx.send(
+            embed=error_embed(
+                "Permission Denied",
+                "You need the **Manage Messages** permission to use this command.",
+                requested_by=ctx.author,
+            )
+        )
+        return
+
+    reference = ctx.message.reference
+    if reference is None or reference.message_id is None:
+        await ctx.send(
+            embed=error_embed(
+                "Reply Required",
+                "Use `a!pin` as a reply to the message you want to pin.",
+                requested_by=ctx.author,
+            )
+        )
+        return
+
+    try:
+        message = reference.resolved
+        if not isinstance(message, discord.Message):
+            message = await ctx.channel.fetch_message(reference.message_id)
+
+        bot_member = ctx.guild.me
+        if bot_member is None or not ctx.channel.permissions_for(bot_member).manage_messages:
+            await ctx.send(
+                embed=error_embed(
+                    "Pin Failed",
+                    "I need the **Manage Messages** permission in this channel.",
+                    requested_by=ctx.author,
+                )
+            )
+            return
+
+        await message.pin(reason=f"Pinned by {ctx.author}")
+    except discord.NotFound:
+        await ctx.send(
+            embed=error_embed(
+                "Pin Failed",
+                "I could not find the message you replied to.",
+                requested_by=ctx.author,
+            )
+        )
+        return
+    except discord.Forbidden:
+        await ctx.send(
+            embed=error_embed(
+                "Pin Failed",
+                "Discord denied the pin request. Check my channel permissions.",
+                requested_by=ctx.author,
+            )
+        )
+        return
+    except discord.HTTPException as exc:
+        await ctx.send(
+            embed=error_embed(
+                "Pin Failed",
+                f"Discord rejected the pin request: `{exc}`",
+                requested_by=ctx.author,
+            )
+        )
+        return
+
+    await ctx.send(
+        embed=success_embed(
+            "Message Pinned",
+            f"[Open the pinned message]({message.jump_url})",
+            requested_by=ctx.author,
+        )
+    )
+
+
+async def dm_user(ctx, user: discord.User, message: str = None):
+    if ctx.author.id not in ALLOWED_CONTROL_USER_IDS:
+        await ctx.send(
+            embed=error_embed(
+                "Permission Denied",
+                "You are not authorized to use this command.",
+                requested_by=ctx.author,
+            )
+        )
+        return
+
+    if user is None or not message:
+        await ctx.send(
+            embed=error_embed(
+                "Invalid Usage",
+                "Usage: `a!dm [userid] [message]`",
+                requested_by=ctx.author,
+            )
+        )
+        return
+
+    try:
+        await user.send(message)
+    except discord.Forbidden:
+        await ctx.send(
+            embed=error_embed(
+                "DM Failed",
+                f"I could not send a DM to **{user}**. Their DMs may be disabled.",
+                requested_by=ctx.author,
+            )
+        )
+        return
+    except discord.HTTPException as exc:
+        await ctx.send(
+            embed=error_embed(
+                "DM Failed",
+                f"Discord rejected the message: `{exc}`",
+                requested_by=ctx.author,
+            )
+        )
+        return
+
+    await ctx.send(
+        embed=success_embed(
+            "DM Sent",
+            f"Your message was sent to **{user}**.",
+            requested_by=ctx.author,
+        )
+    )
+
 # ======================
 # SSU + POLL SYSTEM
 # ======================
 
-ALLOWED_POLL_ROLE_IDS = {1300127296476151909}
 SSU_ANNOUNCE_CHANNEL_ID = 1300133839175417918
 SSU_POLL_CHANNEL_ID = 1300133949972021348
 
 # ---------- Reaction Poll Command ----------
-@bot.command(name="poll")
 async def create_poll(ctx, *, time: str = None):
-    has_allowed_role = any(role.id in ALLOWED_POLL_ROLE_IDS for role in ctx.author.roles)
-
-    if ctx.author.id not in ALLOWED_CONTROL_USER_IDS and not has_allowed_role:
+    if ctx.author.id not in get_config_user_ids(load_config(), "ALLOWED_SSU_STAFF_IDS"):
         return
 
     if time is None:
@@ -1894,16 +2050,7 @@ class SSUPollView(discord.ui.View):
         self.guild = guild
 
     async def check_permission(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id in ALLOWED_CONTROL_USER_IDS:
-            return True
-
-        member = self.guild.get_member(interaction.user.id)
-        if member is None:
-            await interaction.followup.send("Access Denied.", ephemeral=True)
-            return False
-
-        has_allowed_role = any(role.id in ALLOWED_POLL_ROLE_IDS for role in member.roles)
-        if has_allowed_role:
+        if interaction.user.id in get_config_user_ids(load_config(), "ALLOWED_SSU_STAFF_IDS"):
             return True
 
         await interaction.followup.send("Access Denied.", ephemeral=True)
@@ -1946,11 +2093,8 @@ class SSUPollView(discord.ui.View):
         await self.send_ssu(interaction, "Serious", "> This mode is for RP demons 😈")
 
 
-@bot.command(name="ssu")
 async def ssu_command(ctx):
-    has_allowed_role = any(role.id in ALLOWED_POLL_ROLE_IDS for role in ctx.author.roles)
-
-    if ctx.author.id not in ALLOWED_CONTROL_USER_IDS and not has_allowed_role:
+    if ctx.author.id not in get_config_user_ids(load_config(), "ALLOWED_SSU_STAFF_IDS"):
         return
 
     embed = discord.Embed(
@@ -3474,36 +3618,54 @@ class StaffTicketView(discord.ui.View):
             )
             return
 
-@bot.command(name='&^V1mticket')
 async def ticket_commandmain(ctx):
-    embed = discord.Embed(
-        title="⚒️ | Support Ticket",
+    if not is_allowed_ticket_staff(ctx.author.id):
+        return
+
+    embed = info_embed(
+        title="Support Ticket",
         description="**Welcome to the support ticket system! Please select the type of support you need from the options below.**",
-        color=embed_color,
+        requested_by=ctx.author,
     )
 
-    embed.add_field(name="⚒️  |  General Support", value="If you have any general questions or inquiries, please select this option.", inline=False)
-    embed.add_field(name="🤝  |  Partnership Support", value="If you wish to partnership with Area - 14 or discuss partnership collaborations, select this option.", inline=False)
-    embed.add_field(name="🎮  |  In-Game Reports", value="If you wish to report someone rule-breaking in-game, please select this option.", inline=False)
-    embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
-    embed.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
-    msg = await ctx.send(embed=embed, view=SupportTicketView())
+    embed.add_field(name="General Support", value="If you have any general questions or inquiries, please select this option.", inline=False)
+    embed.add_field(name="Partnership Support", value="If you wish to partnership with Area - 14 or discuss partnership collaborations, select this option.", inline=False)
+    embed.add_field(name="In-Game Reports", value="If you wish to report someone rule-breaking in-game, please select this option.", inline=False)
+    await ctx.send(embed=embed, view=SupportTicketView())
 
-@bot.command(name='&^V2hticket')
 async def ticket_commandhub(ctx):
-    embed = discord.Embed(
-        title="⚒️ | Support Ticket",
+    if not is_allowed_ticket_staff(ctx.author.id):
+        return
+
+    embed = info_embed(
+        title="Support Ticket",
         description="**Welcome to the support ticket system! Please select the type of support you need from the options below.**",
-        color=embed_color,
+        requested_by=ctx.author,
     )
 
-    embed.add_field(name="⚒️  |  General Support", value="If you have any general questions or inquiries, please select this option.", inline=False)
-    embed.add_field(name="👮  |  Staff Report", value="If you wish to report a staff member breaking rules, select this option.", inline=False)
-    embed.add_field(name="📋  |  Faction Report", value="If you wish to report factions breaking regulations, select this option.", inline=False)
-    embed.add_field(name="🔓  |  Appeal Support", value="If you wish to appeal a faction infraction, select this option.", inline=False)
-    embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
-    embed.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
-    msg = await ctx.send(embed=embed, view=StaffTicketView())
+    embed.add_field(name="General Support", value="If you have any general questions or inquiries, please select this option.", inline=False)
+    embed.add_field(name="Staff Report", value="If you wish to report a staff member breaking rules, select this option.", inline=False)
+    embed.add_field(name="Faction Report", value="If you wish to report factions breaking regulations, select this option.", inline=False)
+    embed.add_field(name="Appeal Support", value="If you wish to appeal a faction infraction, select this option.", inline=False)
+    await ctx.send(embed=embed, view=StaffTicketView())
+
+
+COG_MODULES = (
+    "cogs.admin",
+    "cogs.moderation",
+    "cogs.ssu",
+    "cogs.tickets",
+    "cogs.punishments",
+    "cogs.help",
+)
+
+
+async def setup_hook():
+    for module_name in COG_MODULES:
+        await bot.load_extension(module_name)
+
+
+bot.setup_hook = setup_hook
 
 if __name__ == "__main__":
     if not token:
