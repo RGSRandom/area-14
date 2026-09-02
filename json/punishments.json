@@ -1,2 +1,32 @@
 [
+    {
+        "punishment_id": "PUN-260902-OPC7",
+        "message_id": 1544755957777834107,
+        "faction_id": "D-1",
+        "faction_name": "Administrative Department",
+        "punishment": "Warning-1",
+        "reason": "test",
+        "proof": "test",
+        "appealable": true,
+        "anonymous": false,
+        "status": "active",
+        "punished_by": "cipher90x",
+        "punished_by_id": 1207911714276905001,
+        "timestamp": "2026-09-02T10:08:40.603523"
+    },
+    {
+        "punishment_id": "PUN-260902-VFK0",
+        "message_id": 1544756598533128293,
+        "faction_id": "D-1",
+        "faction_name": "Administrative Department",
+        "punishment": "Strike 1",
+        "reason": "yes",
+        "proof": "yes",
+        "appealable": true,
+        "anonymous": false,
+        "status": "active",
+        "punished_by": "cipher90x",
+        "punished_by_id": 1207911714276905001,
+        "timestamp": "2026-09-02T10:11:13.389477"
+    }
 ]

@@ -10,6 +10,7 @@ import json
 import sys
 import asyncio
 import re
+import math
 import chat_exporter
 from datetime import datetime, timedelta
 from embed_template import create_embed, error_embed, info_embed, success_embed
@@ -632,16 +633,28 @@ async def debug(ctx):
     config_data = load_config()
 
     embed = info_embed("Bot Status", requested_by=ctx.author)
+    bot_user = bot.user
+    bot_status = (
+        f"{bot_user}\nID: `{bot_user.id}`"
+        if bot_user is not None
+        else "Unavailable (failed to load bot identity)"
+    )
+    latency_ms = bot.latency * 1000
+    latency_status = (
+        f"{round(latency_ms)} ms"
+        if math.isfinite(latency_ms)
+        else "Unavailable (failed to measure latency)"
+    )
 
     embed.add_field(
         name="Bot",
-        value=f"{bot.user}\nID: `{bot.user.id}`",
+        value=bot_status,
         inline=False
     )
 
     embed.add_field(
         name="Latency",
-        value=f"{round(bot.latency * 1000)} ms",
+        value=latency_status,
         inline=True
     )
 
@@ -1015,15 +1028,31 @@ async def beg(ctx):
 
 
 
-SERVICE_ACCOUNT_FILE = "CREDENTIALS.json"
-
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
 
+google_sheets_config = config.get("GOOGLE_SHEETS", {})
+SERVICE_ACCOUNT_FILE = repo_root / google_sheets_config.get(
+    "CREDENTIALS_FILE", "CREDENTIALS.json"
+)
+SPREADSHEET_KEY = google_sheets_config.get("SPREADSHEET_KEY")
+INFRACTIONS_WORKSHEET = google_sheets_config.get(
+    "INFRACTIONS_WORKSHEET", "Infractions Database"
+)
+FACTION_WORKSHEET = google_sheets_config.get(
+    "FACTION_WORKSHEET", "Faction Database"
+)
+
 gc = None
-if gspread is not None and Credentials is not None:
+if not google_sheets_config.get("ENABLED", True):
+    logger.info("Google Sheets integration disabled by config.json")
+elif not SPREADSHEET_KEY:
+    logger.warning(
+        "Google Sheets integration disabled; GOOGLE_SHEETS.SPREADSHEET_KEY is missing"
+    )
+elif gspread is not None and Credentials is not None:
     try:
         creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
         gc = gspread.authorize(creds)
@@ -1086,8 +1115,8 @@ class ApprovalView(View):
 
         # Update Google Sheet
         try:
-            sheet = gc.open_by_key(SPREADSHEET_KEY).worksheet("Infractions Database")
-            sheet_main = gc.open_by_key(SPREADSHEET_KEY).worksheet("Faction Database")
+            sheet = gc.open_by_key(SPREADSHEET_KEY).worksheet(INFRACTIONS_WORKSHEET)
+            sheet_main = gc.open_by_key(SPREADSHEET_KEY).worksheet(FACTION_WORKSHEET)
 
             cell = sheet.find(found["faction_id"], in_column=3)
             cell_main = sheet_main.find(found["faction_id"], in_column=3)
@@ -1107,7 +1136,7 @@ class ApprovalView(View):
             await interaction.followup.send(f"JSON updated but failed to update sheet: `{e}`", ephemeral=True)
 
         # Post final embed to punish channel
-        channel = bot.get_channel(PUNISH_CHANNEL_ID)
+        channel = await resolve_channel(PUNISH_CHANNEL_ID)
         if channel:
             ping_role = None
             if interaction.guild:
@@ -1198,21 +1227,124 @@ class ApprovalView(View):
             f"Punishment `{found['punishment_id']}` has been **denied**.", ephemeral=True
         )
 
-PUNISH_CHANNEL_ID = 1346160132647551029
+PUNISH_CHANNEL_ID = config.get("PUNISH_CHANNEL_ID")
 
 ACCEPT_CHANNEL_ID=1478069999410217010
+APPROVAL_ENABLED = False
+
+async def resolve_channel(channel_id, guild=None):
+    channel = guild.get_channel(channel_id) if guild else None
+    if channel is None:
+        channel = bot.get_channel(channel_id)
+    if channel is not None:
+        return channel
+    try:
+        return await bot.fetch_channel(channel_id)
+    except Exception as exc:
+        logger.exception("Unable to resolve Discord channel %s: %s", channel_id, exc)
+        return None
+
+class PunishmentModal(discord.ui.Modal, title="Faction Infraction"):
+    faction = discord.ui.TextInput(
+        label="Faction name or ID",
+        placeholder="Enter the faction name or ID",
+        max_length=100,
+    )
+    punishment_type = discord.ui.TextInput(
+        label="Punishment type",
+        placeholder="warning or strike",
+        max_length=20,
+    )
+    appealable = discord.ui.TextInput(
+        label="Appealable?",
+        placeholder="yes or no",
+        max_length=10,
+    )
+    reason = discord.ui.TextInput(
+        label="Reason",
+        placeholder="Explain the infraction. Start with y for anonymous.",
+        style=discord.TextStyle.paragraph,
+        max_length=1000,
+    )
+    proof = discord.ui.TextInput(
+        label="Proof link or details",
+        placeholder="Provide a link or describe the proof",
+        style=discord.TextStyle.paragraph,
+        max_length=2000,
+    )
+
+    def __init__(self, ctx):
+        super().__init__()
+        self.ctx = ctx
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        logger.info("Punishment form submitted by %s", interaction.user)
+        full = f"{self.reason.value.strip()} | {self.proof.value.strip()}"
+        try:
+            await punish(
+                self.ctx,
+                self.faction.value.strip(),
+                self.punishment_type.value.strip(),
+                self.appealable.value.strip(),
+                full=full,
+            )
+        except Exception:
+            logger.exception("Punishment form failed for %s", interaction.user)
+            await interaction.followup.send(
+                "The punishment form failed unexpectedly. Please check the bot logs.",
+                ephemeral=True,
+            )
+
+
+class PunishmentFormView(discord.ui.View):
+    def __init__(self, ctx):
+        super().__init__(timeout=300)
+        self.ctx = ctx
+
+    @discord.ui.button(label="Open punishment form", style=discord.ButtonStyle.primary)
+    async def open_form(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.ctx.author.id:
+            await interaction.response.send_message(
+                "Only the staff member who started this form can use it.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.send_modal(PunishmentModal(self.ctx))
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+
+
+async def start_punishment_form(ctx):
+    has_faction_management_role = 1346192810998501396 in {
+        role.id for role in ctx.author.roles
+    }
+    if not has_faction_management_role and not is_controlled_user(ctx.author.id):
+        await ctx.send("You do not have permission to use the punishment form.")
+        return
+    await ctx.send(
+        "Complete the infraction form below.",
+        view=PunishmentFormView(ctx),
+    )
+
 
 async def punish(ctx, query: str, punishment_type: str, appealable: str, *, full: str = None):
     # 1. Role checks
     fm_role = 1346192810998501396
-    fm_can_punish = [1523264806012850337, 1346192809539141693]
 
     user_role_ids = [role.id for role in ctx.author.roles]
 
-    if fm_role not in user_role_ids:
+    if fm_role not in user_role_ids and not is_controlled_user(ctx.author.id):
+        await ctx.send("You do not have permission to issue faction punishments.")
         return
 
-    can_punish = any(role_id in user_role_ids for role_id in fm_can_punish)
+    if gc is None:
+        await ctx.send(
+            "Google Sheets is unavailable. The punishment was not applied."
+        )
+        return
 
     # 2. Parse full text
     if full is None:
@@ -1260,8 +1392,8 @@ async def punish(ctx, query: str, punishment_type: str, appealable: str, *, full
         return
 
     try:
-        sheet = gc.open_by_key(SPREADSHEET_KEY).worksheet("Infractions Database")
-        sheet_main = gc.open_by_key(SPREADSHEET_KEY).worksheet("Faction Database")
+        sheet = gc.open_by_key(SPREADSHEET_KEY).worksheet(INFRACTIONS_WORKSHEET)
+        sheet_main = gc.open_by_key(SPREADSHEET_KEY).worksheet(FACTION_WORKSHEET)
 
         # Find the faction
         cell = sheet.find(query, in_column=3)
@@ -1278,19 +1410,19 @@ async def punish(ctx, query: str, punishment_type: str, appealable: str, *, full
         if punishment_type in ("warning", "w"):
             current = sheet.cell(row, 7).value
             if current in (None, "", " "):
-                next_punishment = "Warning-1"
-            elif current == "Warning-1":
-                next_punishment = "Warning-2"
+                next_punishment = "Warning 1"
+            elif current in ("Warning 1", "Warning-1"):
+                next_punishment = "Warning 2"
             else:
-                next_punishment = "Warning-3"
+                next_punishment = "Warning 3"
         else:
             current = sheet.cell(row, 6).value
             if current in (None, "", " "):
-                next_punishment = "Strike-1"
-            elif current == "Strike-1":
-                next_punishment = "Strike-2"
+                next_punishment = "Strike 1"
+            elif current in ("Strike 1", "Strike-1"):
+                next_punishment = "Strike 2"
             else:
-                next_punishment = "Strike-3"
+                next_punishment = "Strike 3"
 
         punishment_id = generate_punishment_id()
 
@@ -1312,9 +1444,8 @@ async def punish(ctx, query: str, punishment_type: str, appealable: str, *, full
         # ==========================================
         # BRANCH A: Needs Approval
         # ==========================================
-        if not can_punish:
+        if APPROVAL_ENABLED:
             await ctx.message.add_reaction("✅")
-            await ctx.send("You do not have permission to issue punishments directly. Your request has been sent for approval.")
 
             embed = discord.Embed(title="Faction Infraction Request", color=embed_color)
             embed.add_field(name="Faction Name", value=name, inline=False)
@@ -1336,7 +1467,15 @@ async def punish(ctx, query: str, punishment_type: str, appealable: str, *, full
             )
 
             view = ApprovalView()
-            approve_channel = bot.get_channel(ACCEPT_CHANNEL_ID)
+            approve_channel = await resolve_channel(ACCEPT_CHANNEL_ID, ctx.guild)
+            if approve_channel is None:
+                await ctx.send(
+                    "The approval channel is unavailable. Please contact an administrator."
+                )
+                return
+            await ctx.send(
+                "You do not have permission to issue punishments directly. Your request has been sent for approval."
+            )
             punish_msg = await approve_channel.send(content=content, embed=embed, view=view)
 
             if attachments:
@@ -1395,7 +1534,12 @@ async def punish(ctx, query: str, punishment_type: str, appealable: str, *, full
                     icon_url=ctx.author.display_avatar.url
                 )
 
-            channel = bot.get_channel(PUNISH_CHANNEL_ID)
+            channel = await resolve_channel(PUNISH_CHANNEL_ID, ctx.guild)
+            if channel is None:
+                await ctx.send(
+                    "The punishment channel is unavailable. Please contact an administrator."
+                )
+                return
             punish_msg = await channel.send(content=content, embed=embed)
 
             if attachments:
@@ -1429,21 +1573,21 @@ def get_highest_punishment(punishments, faction_id, ptype):
     for entry in punishments:
         if entry["faction_id"] != faction_id or entry["status"] != "active":
             continue
-        pun = entry["punishment"]
-        if ptype == "warning" and pun.startswith("Warning-"):
+        pun = entry["punishment"].replace("-", " ")
+        if ptype == "warning" and pun.startswith("Warning "):
             try:
-                levels.append(int(pun.split("-")[1]))
+                levels.append(int(pun.split(" ")[1]))
             except:
                 pass
-        elif ptype == "strike" and pun.startswith("Strike-"):
+        elif ptype == "strike" and pun.startswith("Strike "):
             try:
-                levels.append(int(pun.split("-")[1]))
+                levels.append(int(pun.split(" ")[1]))
             except:
                 pass
 
     if not levels:
         return ""
-    return f"{'Warning' if ptype == 'warning' else 'Strike'}-{max(levels)}"
+    return f"{'Warning' if ptype == 'warning' else 'Strike'} {max(levels)}"
 
 async def show_punishment(ctx, punishment_id: str = None):
     # Delete the trigger message
@@ -1515,7 +1659,7 @@ async def appeal(ctx, punishment_id: str):
 
     # ===== Recalculate and update Google Sheet =====
     try:
-        sheet = gc.open_by_key(SPREADSHEET_KEY).worksheet("Infractions Database")
+        sheet = gc.open_by_key(SPREADSHEET_KEY).worksheet(INFRACTIONS_WORKSHEET)
         cell = sheet.find(found["faction_id"], in_column=3)
         row = cell.row
 
@@ -1572,7 +1716,7 @@ async def revoke(ctx, punishment_id: str):
 
     # ===== Recalculate and update Google Sheet =====
     try:
-        sheet = gc.open_by_key(SPREADSHEET_KEY).worksheet("Infractions Database")
+        sheet = gc.open_by_key(SPREADSHEET_KEY).worksheet(INFRACTIONS_WORKSHEET)
         cell = sheet.find(found["faction_id"], in_column=3)
         row = cell.row
 
@@ -1866,6 +2010,53 @@ async def show_avatar(ctx, user: discord.User = None):
         requested_by=ctx.author,
     )
     embed.set_image(url=user.display_avatar.url)
+    await ctx.send(embed=embed)
+
+
+async def show_user_info(ctx, user_id: str):
+    if ctx.guild is None:
+        await ctx.send("This command can only be used in a server.")
+        return
+
+    try:
+        member_id = int(user_id)
+    except (TypeError, ValueError):
+        await ctx.send("Please provide a valid numeric user ID.")
+        return
+
+    member = ctx.guild.get_member(member_id)
+    if member is None:
+        try:
+            member = await ctx.guild.fetch_member(member_id)
+        except discord.NotFound:
+            await ctx.send("That user is not a member of this server.")
+            return
+        except discord.HTTPException:
+            await ctx.send("I could not retrieve that user's information.")
+            return
+
+    role_names = [role.mention for role in reversed(member.roles) if role != ctx.guild.default_role]
+    role_value = ", ".join(role_names) if role_names else "No roles"
+    if len(role_value) > 1024:
+        role_value = role_value[:1021] + "..."
+
+    permissions = [
+        name.replace("_", " ").title()
+        for name, enabled in member.guild_permissions if enabled
+    ]
+    permissions_value = ", ".join(permissions) if permissions else "No special permissions"
+    if len(permissions_value) > 1024:
+        permissions_value = permissions_value[:1021] + "..."
+
+    embed = info_embed("User Information", requested_by=ctx.author)
+    embed.set_thumbnail(url=member.display_avatar.url)
+    embed.add_field(name="User", value=f"{member.mention}\n`{member}`", inline=True)
+    embed.add_field(name="User ID", value=f"`{member.id}`", inline=True)
+    embed.add_field(name="Status", value=str(member.status).title(), inline=True)
+    embed.add_field(name="Created", value=discord.utils.format_dt(member.created_at, "F"), inline=False)
+    embed.add_field(name="Joined Server", value=discord.utils.format_dt(member.joined_at, "F"), inline=False)
+    embed.add_field(name="Roles", value=role_value, inline=False)
+    embed.add_field(name="Permissions", value=permissions_value, inline=False)
     await ctx.send(embed=embed)
 
 
