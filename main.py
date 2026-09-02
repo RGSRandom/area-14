@@ -1423,19 +1423,19 @@ async def punish(ctx, query: str, punishment_type: str, appealable: str, *, full
         if punishment_type in ("warning", "w"):
             current = sheet.cell(row, 7).value
             if current in (None, "", " "):
-                next_punishment = "Warning 1"
+                next_punishment = "Warning-1"
             elif current in ("Warning 1", "Warning-1"):
-                next_punishment = "Warning 2"
+                next_punishment = "Warning-2"
             else:
-                next_punishment = "Warning 3"
+                next_punishment = "Warning-3"
         else:
             current = sheet.cell(row, 6).value
             if current in (None, "", " "):
-                next_punishment = "Strike 1"
+                next_punishment = "Strike-1"
             elif current in ("Strike 1", "Strike-1"):
-                next_punishment = "Strike 2"
+                next_punishment = "Strike-2"
             else:
-                next_punishment = "Strike 3"
+                next_punishment = "Strike-3"
 
         punishment_id = generate_punishment_id()
 
