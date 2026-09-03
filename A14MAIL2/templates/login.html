@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - A14MAIL</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="auth-wrap">
+        <div class="box">
+            <div class="brand" style="padding: 0 0 8px;">
+                <div class="brand-mark">A14</div>
+                A14MAIL
+            </div>
+            <p class="kicker">Private mail. Sign in to continue.</p>
+
+            {% with messages = get_flashed_messages() %}
+                {% if messages %}
+                    <p class="error">{{ messages[0] }}</p>
+                {% endif %}
+            {% endwith %}
+
+            <form method="POST">
+                {{ form.hidden_tag() }}
+                <label>Email</label>
+                {{ form.email(placeholder="MAIL@SCiP.net") }}
+                <label>Password</label>
+                {{ form.password(placeholder="Password") }}
+                {{ form.submit() }}
+            </form>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Manage Users - A14MAIL</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="navbar">
+        <strong>{{ user }} (Admin)</strong>
+        <div>
+            <a href="{{ url_for('inbox') }}">Inbox</a>
+            <a href="{{ url_for('admin_users') }}">Manage Users</a>
+            <a href="{{ url_for('logout') }}">Logout</a>
+        </div>
+    </div>
+
+    <div class="box" style="max-width: 800px;">
+        <h2>Manage Users</h2>
+
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                <p class="success">{{ messages[0] }}</p>
+            {% endif %}
+        {% endwith %}
+
+        <table>
+            <tr>
+                <th>Email</th>
+                <th>Name</th>
+                <th>Role</th>
+                <th>Change Password</th>
+            </tr>
+            {% for u in users %}
+            <tr>
+                <td>{{ u.email }}</td>
+                <td>{{ u.name }}</td>
+                <td>{{ u.role }}</td>
+                <td>
+                    <form method="POST" action="{{ url_for('admin_change_password') }}" style="display: flex; gap: 8px; align-items: center;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="email" value="{{ u.email }}">
+                        <input type="password" name="new_password" placeholder="New password" required style="width: 150px; margin: 0; padding: 8px;">
+                        <button type="submit" style="width: auto; padding: 8px 14px;">Change</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+</body>
+</html>
