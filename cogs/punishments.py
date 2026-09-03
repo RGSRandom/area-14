@@ -15,6 +15,14 @@ class PunishmentsCog(commands.Cog):
     async def show(self, ctx, punishment_id: str = None):
         await main.show_punishment(ctx, punishment_id)
 
+    @commands.command(name="list")
+    async def list(self, ctx):
+        await main.list_punishments(ctx)
+
+    @commands.command(name="factioninfo")
+    async def factioninfo(self, ctx, *, faction_query: str = None):
+        await main.faction_info(ctx, faction_query)
+
     @commands.command(name="appeal")
     async def appeal(self, ctx, punishment_id: str):
         await main.appeal(ctx, punishment_id)
