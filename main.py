@@ -1131,14 +1131,46 @@ class ApprovalView(View):
             sheet = gc.open_by_key(SPREADSHEET_KEY).worksheet(INFRACTIONS_WORKSHEET)
             sheet_main = gc.open_by_key(SPREADSHEET_KEY).worksheet(FACTION_WORKSHEET)
 
-            cell = sheet.find(found["faction_id"], in_column=3)
-            cell_main = sheet_main.find(found["faction_id"], in_column=3)
+            faction_id = str(found.get("faction_id", "")).strip()
+            if not faction_id:
+                await interaction.followup.send(
+                    "This punishment has no faction ID saved.",
+                    ephemeral=True,
+                )
+                return
+
+            cell = sheet.find(
+                faction_id,
+                in_column=3,
+                case_sensitive=False,
+            )
+            cell_main = sheet_main.find(
+                faction_id,
+                in_column=3,
+                case_sensitive=False,
+            )
+
+            if cell is None:
+                await interaction.followup.send(
+                    f"Faction ID `{faction_id}` was not found in column C of "
+                    f"`{INFRACTIONS_WORKSHEET}`.",
+                    ephemeral=True,
+                )
+                return
+
+            if cell_main is None:
+                await interaction.followup.send(
+                    f"Faction ID `{faction_id}` was not found in column C of "
+                    f"`{FACTION_WORKSHEET}`.",
+                    ephemeral=True,
+                )
+                return
 
             row = cell.row
-            row_main = cell_main.row          # ← was wrong before (you used cell.row)
+            row_main = cell_main.row
 
-            # Read the Leader (column H = 8)
-            leader_id = sheet_main.cell(row_main, 8).value
+            # Read the Leader (column H = 8).
+            leader_id = str(sheet_main.cell(row_main, 8).value or "").strip()
 
 
             if "Warning" in found["punishment"]:
@@ -1146,7 +1178,15 @@ class ApprovalView(View):
             elif "Strike" in found["punishment"]:
                 sheet.update_cell(row, 6, found["punishment"])
         except Exception as e:
-            await interaction.followup.send(f"JSON updated but failed to update sheet: `{e}`", ephemeral=True)
+            logger.exception(
+                "Failed to approve punishment %s",
+                found.get("punishment_id"),
+            )
+            await interaction.followup.send(
+                f"Failed to update Google Sheet: `{e}`",
+                ephemeral=True,
+            )
+            return
 
         # Post final embed to punish channel
         channel = await resolve_channel(PUNISH_CHANNEL_ID)
@@ -1180,7 +1220,13 @@ class ApprovalView(View):
                     icon_url=interaction.user.display_avatar.url
                 )
 
-            final_msg = await channel.send(content=f"{content} <@{leader_id}>", embed=embed)
+            content_parts = []
+            if content:
+                content_parts.append(content)
+            if leader_id:
+                content_parts.append(f"<@{leader_id}>")
+            final_content = " ".join(content_parts) or None
+            final_msg = await channel.send(content=final_content, embed=embed)
 
             # IMPORTANT: update the message_id so appeal/revoke reply to the public message
             found["message_id"] = final_msg.id
@@ -1404,20 +1450,61 @@ async def punish(ctx, query: str, punishment_type: str, appealable: str, *, full
         await ctx.send("Invalid punishment type. Use `warning`/`w` or `strike`/`s`.")
         return
 
+    if appealable not in ("yes", "y", "no", "n"):
+        await ctx.send("Invalid appealable value. Use `yes`/`y` or `no`/`n`.")
+        return
+
     try:
         sheet = gc.open_by_key(SPREADSHEET_KEY).worksheet(INFRACTIONS_WORKSHEET)
         sheet_main = gc.open_by_key(SPREADSHEET_KEY).worksheet(FACTION_WORKSHEET)
 
-        # Find the faction
-        cell = sheet.find(query, in_column=3)
-        cell_main = sheet_main.find(query, in_column=3)
+        # Find the faction by ID in column C or name in column D.
+        query = query.strip()
+
+        cell = sheet.find(query, in_column=3, case_sensitive=False)
+        if cell is None:
+            cell = sheet.find(query, in_column=4, case_sensitive=False)
+
+        if cell is None:
+            await ctx.send(
+                f"Faction `{query}` was not found by ID in column C or by name "
+                f"in column D of `{INFRACTIONS_WORKSHEET}`."
+            )
+            return
 
         row = cell.row
-        row_main = cell_main.row
-        name = sheet.cell(row, 4).value
+        faction_id = str(sheet.cell(row, 3).value or "").strip()
+        name = str(sheet.cell(row, 4).value or "").strip()
 
-        # Read Leader ID from column H
-        leader_id = sheet_main.cell(row_main, 8).value
+        if not faction_id:
+            await ctx.send(
+                f"Faction found on row `{row}`, but its faction ID in column C is empty."
+            )
+            return
+
+        if not name:
+            await ctx.send(
+                f"Faction `{faction_id}` was found, but its name in column D is empty."
+            )
+            return
+
+        # Always use the canonical faction ID to locate the matching main row.
+        cell_main = sheet_main.find(
+            faction_id,
+            in_column=3,
+            case_sensitive=False,
+        )
+        if cell_main is None:
+            await ctx.send(
+                f"Faction ID `{faction_id}` exists in `{INFRACTIONS_WORKSHEET}`, "
+                f"but not in column C of `{FACTION_WORKSHEET}`."
+            )
+            return
+
+        row_main = cell_main.row
+
+        # Read Leader ID from column H.
+        leader_id = str(sheet_main.cell(row_main, 8).value or "").strip()
 
         # Calculate next punishment
         if punishment_type in ("warning", "w"):
@@ -1439,12 +1526,17 @@ async def punish(ctx, query: str, punishment_type: str, appealable: str, *, full
 
         punishment_id = generate_punishment_id()
 
-        # Find role to ping
+        # Find the faction role using the canonical faction ID.
         ping_role = None
-        for role in ctx.guild.roles:
-            if role.name.startswith(query) or role.name.startswith(f"[{query}]"):
-                ping_role = role
-                break
+        if ctx.guild is not None:
+            for role in ctx.guild.roles:
+                role_name = role.name.strip()
+                if (
+                    role_name.startswith(faction_id)
+                    or role_name.startswith(f"[{faction_id}]")
+                ):
+                    ping_role = role
+                    break
 
         # Build content with role + leader
         content_parts = []
@@ -1499,7 +1591,7 @@ async def punish(ctx, query: str, punishment_type: str, appealable: str, *, full
             log_entry = {
                 "punishment_id": punishment_id,
                 "message_id": punish_msg.id,
-                "faction_id": query,
+                "faction_id": faction_id,
                 "faction_name": name,
                 "punishment": next_punishment,
                 "reason": reason,
@@ -1563,7 +1655,7 @@ async def punish(ctx, query: str, punishment_type: str, appealable: str, *, full
             log_entry = {
                 "punishment_id": punishment_id,
                 "message_id": punish_msg.id,
-                "faction_id": query,
+                "faction_id": faction_id,
                 "faction_name": name,
                 "punishment": next_punishment,
                 "reason": reason,
@@ -1673,7 +1765,17 @@ async def appeal(ctx, punishment_id: str):
     # ===== Recalculate and update Google Sheet =====
     try:
         sheet = gc.open_by_key(SPREADSHEET_KEY).worksheet(INFRACTIONS_WORKSHEET)
-        cell = sheet.find(found["faction_id"], in_column=3)
+        cell = sheet.find(
+            found["faction_id"],
+            in_column=3,
+            case_sensitive=False,
+        )
+        if cell is None:
+            await ctx.send(
+                f"Faction ID `{found['faction_id']}` was not found in column C "
+                f"of `{INFRACTIONS_WORKSHEET}`."
+            )
+            return
         row = cell.row
 
         highest_warning = get_highest_punishment(punishments, found["faction_id"], "warning")
@@ -1730,7 +1832,17 @@ async def revoke(ctx, punishment_id: str):
     # ===== Recalculate and update Google Sheet =====
     try:
         sheet = gc.open_by_key(SPREADSHEET_KEY).worksheet(INFRACTIONS_WORKSHEET)
-        cell = sheet.find(found["faction_id"], in_column=3)
+        cell = sheet.find(
+            found["faction_id"],
+            in_column=3,
+            case_sensitive=False,
+        )
+        if cell is None:
+            await ctx.send(
+                f"Faction ID `{found['faction_id']}` was not found in column C "
+                f"of `{INFRACTIONS_WORKSHEET}`."
+            )
+            return
         row = cell.row
 
         highest_warning = get_highest_punishment(punishments, found["faction_id"], "warning")
