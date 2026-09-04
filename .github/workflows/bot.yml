@@ -24,6 +24,8 @@ jobs:
 
       - run: |
           echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" >> .env
+          echo "TURSO_DATABASE_URL=${{ secrets.TURSO_DATABASE_URL }}" >> .env
+          echo "TURSO_AUTH_TOKEN=${{ secrets.TURSO_AUTH_TOKEN }}" >> .env
           echo '${{ secrets.GCP_CREDENTIALS }}' > CREDENTIALS.json
 
       - run: python main.py

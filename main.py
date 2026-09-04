@@ -11,9 +11,14 @@ import sys
 import asyncio
 import re
 import math
+import threading
 import chat_exporter
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from embed_template import create_embed, error_embed, info_embed, success_embed
+try:
+    import libsql_experimental as libsql
+except ImportError:
+    libsql = None
 try:
     import gspread
     from google.oauth2.service_account import Credentials
@@ -25,6 +30,9 @@ from discord.ui import View, Button
 script_path = Path(__file__).resolve()
 repo_root = script_path.parent if script_path.parent.name.lower() != "py" else script_path.parent.parent
 load_dotenv(dotenv_path=repo_root / '.env')
+
+if __name__ == "__main__":
+    sys.modules["main"] = sys.modules[__name__]
 
 # Setup logging
 log_stream = sys.stdout
@@ -65,21 +73,74 @@ channel_log_ticket_hub = 1379696175053148210
 
 active_ticket_creations = set()
 
-PUNISHMENTS_FILE = Path("json/punishments.json")
+TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL")
+TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN")
+TURSO_LOCAL_PATH = repo_root / "punishments.db"
+_punishment_db = None
+_punishment_db_lock = threading.RLock()
+
+
+def _get_punishment_db():
+    global _punishment_db
+
+    if libsql is None:
+        raise RuntimeError("libsql-experimental is not installed")
+    if not TURSO_DATABASE_URL or not TURSO_AUTH_TOKEN:
+        raise RuntimeError(
+            "TURSO_DATABASE_URL and TURSO_AUTH_TOKEN must be set in .env"
+        )
+
+    if _punishment_db is None:
+        _punishment_db = libsql.connect(
+            str(TURSO_LOCAL_PATH),
+            sync_url=TURSO_DATABASE_URL,
+            auth_token=TURSO_AUTH_TOKEN,
+        )
+        _punishment_db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS punishments (
+                punishment_id TEXT PRIMARY KEY,
+                data TEXT NOT NULL
+            )
+            """
+        )
+        _punishment_db.commit()
+
+    _punishment_db.sync()
+    return _punishment_db
+
 
 def load_punishments():
-    if not PUNISHMENTS_FILE.exists():
-        return []
-    try:
-        with open(PUNISHMENTS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, list) else []
-    except Exception:
-        return []
+    with _punishment_db_lock:
+        db = _get_punishment_db()
+        rows = db.execute(
+            "SELECT data FROM punishments ORDER BY rowid"
+        ).fetchall()
+        punishments = []
+        for (data,) in rows:
+            try:
+                entry = json.loads(data)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if isinstance(entry, dict):
+                punishments.append(entry)
+        return punishments
+
 
 def save_punishments(data):
-    with open(PUNISHMENTS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4)
+    with _punishment_db_lock:
+        db = _get_punishment_db()
+        db.execute("DELETE FROM punishments")
+        db.executemany(
+            "INSERT INTO punishments (punishment_id, data) VALUES (?, ?)",
+            [
+                (entry["punishment_id"], json.dumps(entry))
+                for entry in data
+                if isinstance(entry, dict) and entry.get("punishment_id")
+            ],
+        )
+        db.commit()
+        db.sync()
 
 # Load config files helper functions
 def load_config():
@@ -248,6 +309,8 @@ def is_controlled_user(user_id):
 
 
 def is_allowed_ticket_staff(member, config_data=None):
+    if is_controlled_user(member.id):
+        return True
     if config_data is None:
         config_data = load_config()
     return is_member_in_configured_roles(
@@ -256,6 +319,8 @@ def is_allowed_ticket_staff(member, config_data=None):
 
 
 def is_allowed_ssu_staff(member, config_data=None):
+    if is_controlled_user(member.id):
+        return True
     if config_data is None:
         config_data = load_config()
     return is_member_in_configured_roles(
@@ -1085,9 +1150,19 @@ import random
 import string
 
 def generate_punishment_id():
-    date_part = datetime.now().strftime("%y%m%d")
-    random_part = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
-    return f"PUN-{date_part}-{random_part}"
+    existing_ids = {
+        entry.get("punishment_id")
+        for entry in load_punishments()
+        if isinstance(entry, dict)
+    }
+    for _ in range(100):
+        punishment_id = (
+            "".join(random.choices(string.digits, k=2))
+            + random.choice(string.ascii_uppercase)
+        )
+        if punishment_id not in existing_ids:
+            return punishment_id
+    raise RuntimeError("No unused three-character punishment IDs remain")
 
 class ApprovalView(View):
     def __init__(self):
@@ -1204,6 +1279,17 @@ class ApprovalView(View):
             embed.add_field(name="Reason", value=found["reason"], inline=False)
             embed.add_field(name="Punishment", value=found["punishment"], inline=True)
             embed.add_field(name="Appealable", value="Yes" if found["appealable"] else "No", inline=True)
+            if found.get("appeal_date"):
+                appeal_timestamp = int(
+                    datetime.strptime(found["appeal_date"], "%m/%d/%y")
+                    .replace(tzinfo=timezone.utc)
+                    .timestamp()
+                )
+                embed.add_field(
+                    name="Appeal Date",
+                    value=f"<t:{appeal_timestamp}:D>",
+                    inline=True,
+                )
             embed.add_field(name="Status", value="Active", inline=True)
 
             if found["appealable"]:
@@ -1230,7 +1316,15 @@ class ApprovalView(View):
 
             # IMPORTANT: update the message_id so appeal/revoke reply to the public message
             found["message_id"] = final_msg.id
+            found["message_url"] = final_msg.jump_url
             save_punishments(punishments)
+            await notify_faction_leader(
+                found,
+                "Active",
+                interaction.user,
+                final_msg.jump_url,
+                action="issued",
+            )
 
         # Update the original approval message
         try:
@@ -1297,10 +1391,37 @@ async def resolve_channel(channel_id, guild=None):
         channel = bot.get_channel(channel_id)
     if channel is not None:
         return channel
+
+    if not bot.is_ready():
+        try:
+            await bot.wait_until_ready()
+        except RuntimeError as exc:
+            logger.warning(
+                "Unable to resolve Discord channel %s because the bot client is not initialized: %s",
+                channel_id,
+                exc,
+            )
+            return None
+
+    if bot.is_closed():
+        logger.warning("Unable to resolve Discord channel %s because the bot is closed", channel_id)
+        return None
+
     try:
         return await bot.fetch_channel(channel_id)
+    except AttributeError as exc:
+        logger.warning(
+            "Unable to resolve Discord channel %s because Discord is not ready: %s",
+            channel_id,
+            exc,
+        )
+        return None
     except Exception as exc:
-        logger.exception("Unable to resolve Discord channel %s: %s", channel_id, exc)
+        logger.warning(
+            "Unable to resolve Discord channel %s. Confirm the bot is in the channel's guild and has access: %s",
+            channel_id,
+            exc,
+        )
         return None
 
 class PunishmentModal(discord.ui.Modal, title="Faction Infraction"):
@@ -1314,40 +1435,49 @@ class PunishmentModal(discord.ui.Modal, title="Faction Infraction"):
         placeholder="warning or strike",
         max_length=20,
     )
-    appealable = discord.ui.TextInput(
-        label="Appealable?",
-        placeholder="yes or no",
-        max_length=10,
+    appeal_date = discord.ui.TextInput(
+        label="Appeal date (optional)",
+        placeholder="Enter mm/dd/yy if appealable; leave blank otherwise",
+        required=False,
+        max_length=8,
     )
     reason = discord.ui.TextInput(
         label="Reason",
         placeholder="Explain the infraction. Start with y for anonymous.",
         style=discord.TextStyle.paragraph,
         max_length=1000,
+        required=True,
     )
     proof = discord.ui.TextInput(
         label="Proof link or details",
         placeholder="Provide a link or describe the proof",
         style=discord.TextStyle.paragraph,
         max_length=2000,
+        required=True,
     )
 
-    def __init__(self, ctx):
+    def __init__(self, ctx, form_message):
         super().__init__()
         self.ctx = ctx
+        self.form_message = form_message
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer()
         logger.info("Punishment form submitted by %s", interaction.user)
         full = f"{self.reason.value.strip()} | {self.proof.value.strip()}"
         try:
-            await punish(
+            punishment_logged = await punish(
                 self.ctx,
                 self.faction.value.strip(),
                 self.punishment_type.value.strip(),
-                self.appealable.value.strip(),
+                self.appeal_date.value.strip(),
                 full=full,
             )
+            if punishment_logged and self.form_message is not None:
+                try:
+                    await self.form_message.delete()
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    pass
         except Exception:
             logger.exception("Punishment form failed for %s", interaction.user)
             await interaction.followup.send(
@@ -1369,7 +1499,9 @@ class PunishmentFormView(discord.ui.View):
                 ephemeral=True,
             )
             return
-        await interaction.response.send_modal(PunishmentModal(self.ctx))
+        await interaction.response.send_modal(
+            PunishmentModal(self.ctx, self.form_message)
+        )
 
     async def on_timeout(self):
         for item in self.children:
@@ -1383,13 +1515,25 @@ async def start_punishment_form(ctx):
     if not has_faction_management_role and not is_controlled_user(ctx.author.id):
         await ctx.send("You do not have permission to use the punishment form.")
         return
-    await ctx.send(
+    view = PunishmentFormView(ctx)
+    view.form_message = await ctx.send(
         "Complete the infraction form below.",
-        view=PunishmentFormView(ctx),
+        view=view,
     )
+    try:
+        await ctx.message.delete()
+    except (discord.Forbidden, discord.HTTPException):
+        pass
 
 
-async def punish(ctx, query: str, punishment_type: str, appealable: str, *, full: str = None):
+async def punish(
+    ctx,
+    query: str,
+    punishment_type: str,
+    appeal_date: str = "",
+    *,
+    full: str = None,
+):
     # 1. Role checks
     fm_role = 1346192810998501396
 
@@ -1444,15 +1588,18 @@ async def punish(ctx, query: str, punishment_type: str, appealable: str, *, full
         return
 
     punishment_type = punishment_type.lower()
-    appealable = appealable.lower()
 
     if punishment_type not in ("warning", "w", "strike", "s"):
         await ctx.send("Invalid punishment type. Use `warning`/`w` or `strike`/`s`.")
         return
 
-    if appealable not in ("yes", "y", "no", "n"):
-        await ctx.send("Invalid appealable value. Use `yes`/`y` or `no`/`n`.")
-        return
+    appeal_date = appeal_date.strip()
+    if appeal_date:
+        try:
+            appeal_date = datetime.strptime(appeal_date, "%m/%d/%y").strftime("%m/%d/%y")
+        except ValueError:
+            await ctx.send("Invalid appeal date. Use the format `mm/dd/yy`.")
+            return
 
     try:
         sheet = gc.open_by_key(SPREADSHEET_KEY).worksheet(INFRACTIONS_WORKSHEET)
@@ -1550,18 +1697,32 @@ async def punish(ctx, query: str, punishment_type: str, appealable: str, *, full
         # BRANCH A: Needs Approval
         # ==========================================
         if APPROVAL_ENABLED:
-            await ctx.message.add_reaction("✅")
+            try:
+                await ctx.message.add_reaction("✅")
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                pass
 
             embed = discord.Embed(title="Faction Infraction Request", color=embed_color)
             embed.add_field(name="Faction Name", value=name, inline=False)
             embed.add_field(name="Reason", value=reason, inline=False)
             embed.add_field(name="Punishment", value=next_punishment, inline=True)
-            embed.add_field(name="Appealable", value=appealable.capitalize(), inline=True)
+            embed.add_field(name="Appealable", value="Yes" if appeal_date else "No", inline=True)
+            if appeal_date:
+                appeal_timestamp = int(
+                    datetime.strptime(appeal_date, "%m/%d/%y")
+                    .replace(tzinfo=timezone.utc)
+                    .timestamp()
+                )
+                embed.add_field(
+                    name="Appeal Date",
+                    value=f"<t:{appeal_timestamp}:D>",
+                    inline=True,
+                )
             embed.add_field(name="Status", value="Awaiting Approval", inline=True)
             embed.add_field(name="Anonymous", value="Yes" if is_anonymous else "No", inline=True)
             embed.add_field(name="Requested by", value=ctx.author.mention, inline=False)
 
-            if appealable in ("yes", "y"):
+            if appeal_date:
                 embed.add_field(name="Appeal Method", value="HC+ open an appeal ticket.", inline=False)
 
             embed.add_field(name="Proof", value=proof, inline=False)
@@ -1591,12 +1752,15 @@ async def punish(ctx, query: str, punishment_type: str, appealable: str, *, full
             log_entry = {
                 "punishment_id": punishment_id,
                 "message_id": punish_msg.id,
+                "message_url": punish_msg.jump_url,
+                "leader_id": leader_id,
                 "faction_id": faction_id,
                 "faction_name": name,
                 "punishment": next_punishment,
                 "reason": reason,
                 "proof": proof,
-                "appealable": appealable in ("yes", "y"),
+                "appealable": bool(appeal_date),
+                "appeal_date": appeal_date or None,
                 "anonymous": is_anonymous,
                 "status": "awaiting_approval",
                 "punished_by": str(ctx.author),
@@ -1605,7 +1769,11 @@ async def punish(ctx, query: str, punishment_type: str, appealable: str, *, full
             }
             punishments.append(log_entry)
             save_punishments(punishments)
-            return
+            await ctx.send(
+                f"Your punishment request has been sent for approval. "
+                f"Punishment code: `{punishment_id}`"
+            )
+            return True
 
         # ==========================================
         # BRANCH B: Direct Punishment
@@ -1616,16 +1784,30 @@ async def punish(ctx, query: str, punishment_type: str, appealable: str, *, full
             else:
                 sheet.update_cell(row, 6, next_punishment)
 
-            await ctx.message.add_reaction("✅")
+            try:
+                await ctx.message.add_reaction("✅")
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                pass
 
             embed = discord.Embed(title="Faction Infraction", color=embed_color)
             embed.add_field(name="Faction Name", value=name, inline=False)
             embed.add_field(name="Reason", value=reason, inline=False)
             embed.add_field(name="Punishment", value=next_punishment, inline=True)
-            embed.add_field(name="Appealable", value=appealable.capitalize(), inline=True)
+            embed.add_field(name="Appealable", value="Yes" if appeal_date else "No", inline=True)
+            if appeal_date:
+                appeal_timestamp = int(
+                    datetime.strptime(appeal_date, "%m/%d/%y")
+                    .replace(tzinfo=timezone.utc)
+                    .timestamp()
+                )
+                embed.add_field(
+                    name="Appeal Date",
+                    value=f"<t:{appeal_timestamp}:D>",
+                    inline=True,
+                )
             embed.add_field(name="Status", value="Active", inline=True)
 
-            if appealable in ("yes", "y"):
+            if appeal_date:
                 embed.add_field(name="Appeal Method", value="HC+ open a appeal ticket.", inline=False)
 
             embed.add_field(name="Proof", value=proof, inline=False)
@@ -1655,12 +1837,15 @@ async def punish(ctx, query: str, punishment_type: str, appealable: str, *, full
             log_entry = {
                 "punishment_id": punishment_id,
                 "message_id": punish_msg.id,
+                "message_url": punish_msg.jump_url,
+                "leader_id": leader_id,
                 "faction_id": faction_id,
                 "faction_name": name,
                 "punishment": next_punishment,
                 "reason": reason,
                 "proof": proof,
-                "appealable": appealable in ("yes", "y"),
+                "appealable": bool(appeal_date),
+                "appeal_date": appeal_date or None,
                 "anonymous": is_anonymous,
                 "status": "active",
                 "punished_by": str(ctx.author),
@@ -1669,9 +1854,21 @@ async def punish(ctx, query: str, punishment_type: str, appealable: str, *, full
             }
             punishments.append(log_entry)
             save_punishments(punishments)
+            await ctx.send(
+                f"Punishment has been issued. Punishment code: `{punishment_id}`"
+            )
+            await notify_faction_leader(
+                log_entry,
+                "Active",
+                ctx.author,
+                punish_msg.jump_url,
+                action="issued",
+            )
+            return True
 
     except Exception as e:
         await ctx.send(f"Error executing punishment: `{e}`")
+        return False
 
 def get_highest_punishment(punishments, faction_id, ptype):
     levels = []
@@ -1694,13 +1891,104 @@ def get_highest_punishment(punishments, faction_id, ptype):
         return ""
     return f"{'Warning' if ptype == 'warning' else 'Strike'} {max(levels)}"
 
-async def show_punishment(ctx, punishment_id: str = None):
-    # Delete the trigger message
-    try:
-        await ctx.message.delete()
-    except:
-        pass
 
+async def update_punishment_message(found, author):
+    message_id = found.get("message_id")
+    if not message_id:
+        return
+
+    try:
+        channel = bot.get_channel(PUNISH_CHANNEL_ID)
+        if channel is None:
+            channel = bot.get_partial_messageable(
+                PUNISH_CHANNEL_ID,
+                guild_id=config.get("TARGET_GUILD_ID"),
+            )
+        original_message = await channel.fetch_message(message_id)
+        status_value = str(found.get("status", "N/A")).replace("_", " ").title()
+        update_text = (
+            f"**[UPDATE] {datetime.now().strftime('%m/%d/%y')}** - "
+            f"Status has been changed to {status_value} - By {author.mention}"
+        )
+        if original_message.embeds:
+            updated_embed = original_message.embeds[0].copy()
+            status_index = next(
+                (
+                    index
+                    for index, field in enumerate(updated_embed.fields)
+                    if field.name == "Status"
+                ),
+                None,
+            )
+            if status_index is None:
+                updated_embed.add_field(name="Status", value=status_value, inline=True)
+            else:
+                updated_embed.set_field_at(
+                    status_index,
+                    name="Status",
+                    value=status_value,
+                    inline=updated_embed.fields[status_index].inline,
+                )
+            await original_message.edit(content=update_text, embed=updated_embed)
+        else:
+            await original_message.edit(content=update_text)
+        await notify_faction_leader(found, status_value, author, original_message.jump_url)
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException, RuntimeError, AttributeError) as exc:
+        logger.warning(
+            "Failed to update punishment message %s (%s): %s",
+            found.get("punishment_id"),
+            found.get("message_url", "message URL unavailable"),
+            exc,
+        )
+
+
+async def notify_faction_leader(
+    found,
+    status_value,
+    author,
+    message_url,
+    *,
+    action="updated",
+):
+    leader_id = found.get("leader_id")
+    if not leader_id:
+        logger.warning(
+            "Cannot notify faction leader for punishment %s: no leader ID stored",
+            found.get("punishment_id"),
+        )
+        return
+
+    try:
+        leader = bot.get_user(int(leader_id))
+        if leader is None:
+            leader = await bot.fetch_user(int(leader_id))
+        if action == "issued":
+            title = "Punishment Issued"
+            description = "A punishment has been issued to your faction. Please review your punishment log to see if you are able to appeal your punishment. Follow all proper methods to appeal your punishment.\n\n*DO NOT appeal in these DMs*\n*DO NOT appeal in a staff members DMs*\n*DO NOT complain about your punishment in general chat*"
+        else:
+            title = "Punishment Log Updated"
+            description = "Your faction's punishment log has been updated."
+        embed = success_embed(
+            title,
+            description,
+            requested_by=author,
+        )
+        embed.add_field(name="Status", value=status_value, inline=True)
+        embed.add_field(name="Updated By", value=author.mention, inline=True)
+        embed.add_field(
+            name="Message Log",
+            value=f"[View punishment log]({message_url})",
+            inline=False,
+        )
+        await leader.send(embed=embed)
+    except (ValueError, discord.NotFound, discord.Forbidden, discord.HTTPException) as exc:
+        logger.warning(
+            "Failed to DM faction leader for punishment %s: %s",
+            found.get("punishment_id"),
+            exc,
+        )
+
+async def show_punishment(ctx, punishment_id: str = None):
     if punishment_id is None:
         await ctx.send("Usage: `a!show <Punishment ID>`", delete_after=5)
         return
@@ -1709,7 +1997,7 @@ async def show_punishment(ctx, punishment_id: str = None):
     fm_role = 1346192810998501396
     user_role_ids = [role.id for role in ctx.author.roles]
 
-    if fm_role not in user_role_ids:
+    if fm_role not in user_role_ids and not is_controlled_user(ctx.author.id):
         return
 
     punishments = load_punishments()
@@ -1728,6 +2016,11 @@ async def show_punishment(ctx, punishment_id: str = None):
     embed.add_field(name="Faction Name", value=found.get("faction_name", "N/A"), inline=True)
     embed.add_field(name="Punishment", value=found.get("punishment", "N/A"), inline=True)
     embed.add_field(name="Appealable", value="Yes" if found.get("appealable") else "No", inline=True)
+    embed.add_field(
+        name="Status",
+        value=str(found.get("status", "N/A")).replace("_", " ").title(),
+        inline=True,
+    )
     embed.add_field(name="Reason", value=found.get("reason", "N/A"), inline=False)
     embed.add_field(name="Proof", value=found.get("proof", "N/A"), inline=False)
 
@@ -1735,12 +2028,110 @@ async def show_punishment(ctx, punishment_id: str = None):
 
     await ctx.send(embed=embed)
 
+
+async def list_punishments(ctx):
+    fm_role = 1346192810998501396
+    user_role_ids = [role.id for role in ctx.author.roles]
+
+    if fm_role not in user_role_ids and not is_controlled_user(ctx.author.id):
+        return
+
+    punishments = load_punishments()
+    punishments.sort(key=lambda entry: entry.get("timestamp", ""), reverse=True)
+    recent_punishments = punishments[:3]
+
+    if not recent_punishments:
+        await ctx.send("No punishments have been logged yet.")
+        return
+
+    embed = info_embed("Last 3 Issued Punishments", requested_by=ctx.author)
+    for entry in recent_punishments:
+        punishment_id = entry.get("punishment_id", "N/A")
+        details = (
+            f"**Faction:** {entry.get('faction_name', 'N/A')}\n"
+            f"**Punishment:** {entry.get('punishment', 'N/A')}\n"
+            f"**Status:** {str(entry.get('status', 'N/A')).replace('_', ' ').title()}"
+        )
+        message_url = entry.get("message_url")
+        if message_url:
+            details += f"\n[View punishment log]({message_url})"
+        embed.add_field(name=f"Code: {punishment_id}", value=details, inline=False)
+
+    await ctx.send(embed=embed)
+
+async def faction_info(ctx, faction_query: str = None):
+    fm_role = 1346192810998501396
+    user_role_ids = [role.id for role in ctx.author.roles]
+
+    if fm_role not in user_role_ids and not is_controlled_user(ctx.author.id):
+        return
+
+    if not faction_query:
+        await ctx.send("Usage: `a!factioninfo <faction ID or name>`")
+        return
+
+    if gc is None:
+        await ctx.send("Google Sheets is unavailable.")
+        return
+
+    try:
+        sheet = gc.open_by_key(SPREADSHEET_KEY).worksheet(INFRACTIONS_WORKSHEET)
+        sheet_main = gc.open_by_key(SPREADSHEET_KEY).worksheet(FACTION_WORKSHEET)
+        query = faction_query.strip()
+        cell = sheet.find(query, in_column=3, case_sensitive=False)
+        if cell is None:
+            cell = sheet.find(query, in_column=4, case_sensitive=False)
+        if cell is None:
+            await ctx.send(f"Faction `{query}` was not found.")
+            return
+
+        faction_id = str(sheet.cell(cell.row, 3).value or "").strip()
+        faction_name = str(sheet.cell(cell.row, 4).value or "").strip()
+        strike_level = str(sheet.cell(cell.row, 6).value or "None").strip()
+        warning_level = str(sheet.cell(cell.row, 7).value or "None").strip()
+
+        main_cell = sheet_main.find(faction_id, in_column=3, case_sensitive=False)
+        leader_id = ""
+        if main_cell is not None:
+            leader_id = str(sheet_main.cell(main_cell.row, 8).value or "").strip()
+
+        punishments = [
+            entry for entry in load_punishments()
+            if str(entry.get("faction_id", "")).strip().lower() == faction_id.lower()
+        ]
+        punishments.sort(key=lambda entry: entry.get("timestamp", ""), reverse=True)
+
+        embed = info_embed(f"Faction Information: {faction_name}", requested_by=ctx.author)
+        embed.add_field(name="Faction ID", value=faction_id or "N/A", inline=True)
+        embed.add_field(name="Leader", value=f"<@{leader_id}>" if leader_id else "N/A", inline=True)
+        embed.add_field(name="Current Warnings", value=warning_level or "None", inline=True)
+        embed.add_field(name="Current Strikes", value=strike_level or "None", inline=True)
+
+        if punishments:
+            history = []
+            for entry in punishments[:5]:
+                punishment_id = entry.get("punishment_id", "N/A")
+                punishment = entry.get("punishment", "N/A")
+                status = str(entry.get("status", "N/A")).replace("_", " ").title()
+                line = f"`{punishment_id}` - {punishment} ({status})"
+                if entry.get("message_url"):
+                    line += f" [Log]({entry['message_url']})"
+                history.append(line)
+            embed.add_field(name="Recent Punishments", value="\n".join(history), inline=False)
+        else:
+            embed.add_field(name="Recent Punishments", value="None", inline=False)
+
+        await ctx.send(embed=embed)
+    except Exception as exc:
+        logger.exception("Faction info lookup failed for %s", faction_query)
+        await ctx.send(f"Unable to retrieve faction information: `{exc}`")
+
 async def appeal(ctx, punishment_id: str):
     # ===== Role check =====
     fm_role = 1346192810998501396
     user_role_ids = [role.id for role in ctx.author.roles]
 
-    if fm_role not in user_role_ids:
+    if fm_role not in user_role_ids and not is_controlled_user(ctx.author.id):
         return
 
     punishments = load_punishments()
@@ -1793,16 +2184,7 @@ async def appeal(ctx, punishment_id: str):
 
     await ctx.send(f"Punishment `{punishment_id}` marked as **Appealed**.")
 
-    # ===== Reply to original punishment message =====
-    channel = bot.get_channel(PUNISH_CHANNEL_ID)
-    msg_id = found.get("message_id")
-
-    if channel and msg_id:
-        try:
-            original_msg = await channel.fetch_message(msg_id)
-            await original_msg.reply("Punishment **appealed**.")
-        except discord.NotFound:
-            pass
+    await update_punishment_message(found, ctx.author)
 
 
 async def revoke(ctx, punishment_id: str):
@@ -1810,7 +2192,7 @@ async def revoke(ctx, punishment_id: str):
     fm_role = 1346192810998501396
     user_role_ids = [role.id for role in ctx.author.roles]
 
-    if fm_role not in user_role_ids:
+    if fm_role not in user_role_ids and not is_controlled_user(ctx.author.id):
         await ctx.send("You do not have permission to use this command.")
         return
 
@@ -1860,16 +2242,7 @@ async def revoke(ctx, punishment_id: str):
 
     await ctx.send(f"Punishment `{punishment_id}` marked as **REVOKED**.")
 
-    # ===== Reply to original punishment message =====
-    channel = bot.get_channel(PUNISH_CHANNEL_ID)
-    msg_id = found.get("message_id")
-
-    if channel and msg_id:
-        try:
-            original_msg = await channel.fetch_message(msg_id)
-            await original_msg.reply("**REVOKED.**")
-        except discord.NotFound:
-            pass
+    await update_punishment_message(found, ctx.author)
 
 
 @bot.event
@@ -2256,7 +2629,10 @@ async def show_user_info(ctx, user_id: str):
 
 
 async def pin_replied_message(ctx):
-    if not ctx.guild or not ctx.author.guild_permissions.manage_messages:
+    if not ctx.guild or (
+        not ctx.author.guild_permissions.manage_messages
+        and not is_controlled_user(ctx.author.id)
+    ):
         await ctx.send(
             embed=error_embed(
                 "Permission Denied",
