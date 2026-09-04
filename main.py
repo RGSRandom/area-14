@@ -193,7 +193,7 @@ def should_sync_user(user_id, config_data=None):
     return user_id == test_user_id
 
 
-ALLOWED_CONTROL_USER_IDS = {1020581214077333525, 1241045030274203659}
+ALLOWED_CONTROL_USER_IDS = {1020581214077333525, 1241045030274203659, 806127882006167623}
 _sync_enabled = True
 
 
