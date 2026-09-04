@@ -222,6 +222,9 @@ embed_author_name = {"name": "Area - 14 AIC"}
 embed_author_icon = {"icon_url": "https://media.discordapp.net/attachments/1506041053344698379/1526271006266757231/area-14-1.jpg?ex=6a6ecde4&is=6a6d7c64&hm=dc583901adf693945b78c9b5df0092bf126e6ef344725a8755937414e336888d&=&format=webp"}
 embed_footer_text = {"text": "Area - 14 Ticket System"}
 embed_footer_icon = {"icon_url": "https://media.discordapp.net/attachments/1506041053344698379/1526271006266757231/area-14-1.jpg?ex=6a6ecde4&is=6a6d7c64&hm=dc583901adf693945b78c9b5df0092bf126e6ef344725a8755937414e336888d&=&format=webp"}
+embed_footer_text_ssu = {"text": "Area - 14 Server Start Up Notifier"}
+embed_footer_icon_ssu = {"icon_url": "https://media.discordapp.net/attachments/1506041053344698379/1526271006266757231/area-14-1.jpg?ex=6a6ecde4&is=6a6d7c64&hm=dc583901adf693945b78c9b5df0092bf126e6ef344725a8755937414e336888d&=&format=webp"}
+
 
 views_loaded = False
 
@@ -530,37 +533,45 @@ async def on_member_update(before, after):
 
     # Check for roles that were removed
     removed_role_ids = before_role_ids - after_role_ids
-    logger.info(f"[DEBUG] Removed role IDs: {sorted(removed_role_ids)}")
-    for removed_role_id in removed_role_ids:
-        logger.info(f"[DEBUG] Processing removed source role id: {removed_role_id}")
-        target_role_ids = role_mapping.get(removed_role_id)
-        if not target_role_ids:
-            logger.info(f"[DEBUG] No mapping for removed source role {removed_role_id}")
-            continue  # No mapping for this role
+    if removed_role_ids:
+        # Recalculate what target roles the user SHOULD still have
+        should_still_have = set()
+        for source_role in after.roles:          # current roles after the removal
+            if source_role.id in role_mapping:
+                should_still_have.update(role_mapping[source_role.id])
 
-        for target_role_id in target_role_ids:
-            try:
-                target_role = target_guild.get_role(target_role_id)
-                if not target_role:
-                    logger.error(f"[DEBUG] Target role {target_role_id} not found")
+        for removed_role_id in removed_role_ids:
+            target_role_ids = role_mapping.get(removed_role_id)
+            if not target_role_ids:
+                continue
+
+            for target_role_id in target_role_ids:
+                # Only remove the target role if the user no longer has ANY source role that gives it
+                if target_role_id in should_still_have:
                     continue
 
-                logger.info(f"[DEBUG] Attempting to remove role '{target_role.name}' ({target_role.id}) from user {after.id}")
-                await target_member.remove_roles(target_role)
-                channel = bot.get_channel(channel_log_id)
+                try:
+                    target_role = target_guild.get_role(target_role_id)
+                    if not target_role:
+                        continue
 
-                embed = discord.Embed(
-                    title="🗑️  |  ROLE REMOVED",
-                    description=f"Removed role <@&{target_role.id}> from user <@{after.id}>.",
-                    color=embed_color
-                )
-                embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
-                embed.set_footer(text=after.name, icon_url=after.display_avatar.url)
-                await channel.send(embed=embed)
-                logger.info(f"🗑️ Removed role '{target_role.name}' from {after.name} in target server")
+                    await target_member.remove_roles(target_role)
 
-            except Exception as e:
-                logger.error(f"Error removing role for removed role id {removed_role_id} -> target {target_role_id}: {e}", exc_info=True)
+                    channel = bot.get_channel(channel_log_id)
+                    if channel:
+                        embed = discord.Embed(
+                            title="🗑️  |  ROLE REMOVED",
+                            description=f"Removed role <@&{target_role.id}> from user <@{after.id}>.",
+                            color=embed_color
+                        )
+                        embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
+                        embed.set_footer(text=after.name, icon_url=after.display_avatar.url)
+                        await channel.send(embed=embed)
+
+                    logger.info(f"🗑️ Removed role '{target_role.name}' from {after.name}")
+
+                except Exception as e:
+                    logger.error(f"Error removing role: {e}", exc_info=True)
 
 # --- Manual `a!sync` command and concurrency guard ---
 # Track active syncs per target guild to prevent cross-source conflicts
@@ -1060,10 +1071,139 @@ async def execute_user(ctx, user: discord.Member = None):
         await ctx.send(f"❌ Unexpected error: {e}")
         print(f"Error: {e}")
 
+# ======================
+# SSU + POLL SYSTEM
+# ======================
+
+ALLOWED_POLL_ROLE_IDS = {1300127296476151909}
+SSU_ANNOUNCE_CHANNEL_ID = 1300133839175417918
+SSU_POLL_CHANNEL_ID = 1300133949972021348
+
+# ---------- Reaction Poll Command ----------
 @bot.command(name="poll")
-async def create_poll(ctx, time: str = None):
-    if ctx.author.id not in ALLOWED_CONTROL_USER_IDS:
+async def create_poll(ctx, *, time: str = None):
+    has_allowed_role = any(role.id in ALLOWED_POLL_ROLE_IDS for role in ctx.author.roles)
+
+    if ctx.author.id not in ALLOWED_CONTROL_USER_IDS and not has_allowed_role:
         return
+
+    if time is None:
+        return
+
+    embed = discord.Embed(
+        title="Server Start Up Poll | 14 Reactions Required",
+        description=f"Time - {time}",
+        color=embed_color
+    )
+    embed.add_field(name="1️⃣ Casual", value="> This mode is for a chill and relaxing roleplay or just no roleplay.", inline=False)
+    embed.add_field(name="2️⃣ Semi-Serious", value="> More stricter than Casual, with a few limitations but still chill roleplay.", inline=False)
+    embed.add_field(name="3️⃣ Serious", value="> This mode is for RP demons 😈", inline=False)
+    embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
+    embed.set_footer(text=embed_footer_text_ssu["text"], icon_url=embed_footer_icon_ssu["icon_url"])
+    embed.set_image(url="https://media.discordapp.net/attachments/1506041053344698379/1526271004874117341/IMG_20250608_023240.jpg?ex=6a8fc364&is=6a8e71e4&hm=d1e3a0205e2871306910d73a856df48045f6bc7ec700540a0d41cf2ca89e6391&=&format=webp")
+
+    try:
+        try:
+            await ctx.message.delete()
+        except:
+            pass
+
+        channel = ctx.guild.get_channel(SSU_POLL_CHANNEL_ID)
+        if channel is None:
+            await ctx.send("Poll channel not found.", delete_after=5)
+            return
+
+        msg = await channel.send(content="@here <@&1300897601750568961>", embed=embed)
+        await msg.add_reaction("✅")
+        await msg.add_reaction("1️⃣")
+        await msg.add_reaction("2️⃣")
+        await msg.add_reaction("3️⃣")
+
+    except Exception as e:
+        await ctx.send(f"❌ Error creating poll: {e}")
+
+
+# ---------- Button SSU Command ----------
+class SSUPollView(discord.ui.View):
+    def __init__(self, guild: discord.Guild):
+        super().__init__(timeout=None)
+        self.guild = guild
+
+    async def check_permission(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id in ALLOWED_CONTROL_USER_IDS:
+            return True
+
+        member = self.guild.get_member(interaction.user.id)
+        if member is None:
+            await interaction.followup.send("Access Denied.", ephemeral=True)
+            return False
+
+        has_allowed_role = any(role.id in ALLOWED_POLL_ROLE_IDS for role in member.roles)
+        if has_allowed_role:
+            return True
+
+        await interaction.followup.send("Access Denied.", ephemeral=True)
+        return False
+
+    async def send_ssu(self, interaction: discord.Interaction, mode: str, mode_description: str):
+        await interaction.response.defer(ephemeral=True)
+
+        if not await self.check_permission(interaction):
+            return
+
+        embed = discord.Embed(
+            title="Server Start Up",
+            description=f"{interaction.user.mention} is hosting an SSU. The mode for this SSU is **{mode}**. Please follow all regulations found [here](https://discord.com/channels/1297640433878433792/1300133402636320869) and enjoy your time on-site!",
+            color=embed_color
+        )
+        embed.add_field(name=mode, value=mode_description, inline=False)
+        embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
+        embed.set_footer(text=embed_footer_text_ssu["text"], icon_url=embed_footer_icon_ssu["icon_url"])
+        embed.set_image(url="https://media.discordapp.net/attachments/1506041053344698379/1526271004874117341/IMG_20250608_023240.jpg?ex=6a8fc364&is=6a8e71e4&hm=d1e3a0205e2871306910d73a856df48045f6bc7ec700540a0d41cf2ca89e6391&=&format=webp")
+
+        channel = self.guild.get_channel(SSU_ANNOUNCE_CHANNEL_ID)
+        if channel is None:
+            await interaction.followup.send("SSU announcement channel not found.", ephemeral=True)
+            return
+
+        await channel.send(content="@here <@&1300897601750568961>", embed=embed)
+        await interaction.followup.send(f"SSU started! yayayayay", ephemeral=True)
+
+    @discord.ui.button(label="Casual", style=discord.ButtonStyle.green, custom_id="ssu_1")
+    async def button_1(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.send_ssu(interaction, "Casual", "> This mode is for a chill and relaxing roleplay or just no roleplay.")
+
+    @discord.ui.button(label="Semi-Serious", style=discord.ButtonStyle.blurple, custom_id="ssu_2")
+    async def button_2(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.send_ssu(interaction, "Semi-Serious", "> More stricter than Casual, with a few limitations but still chill roleplay.")
+
+    @discord.ui.button(label="Serious", style=discord.ButtonStyle.red, custom_id="ssu_3")
+    async def button_3(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.send_ssu(interaction, "Serious", "> This mode is for RP demons 😈")
+
+
+@bot.command(name="ssu")
+async def ssu_command(ctx):
+    has_allowed_role = any(role.id in ALLOWED_POLL_ROLE_IDS for role in ctx.author.roles)
+
+    if ctx.author.id not in ALLOWED_CONTROL_USER_IDS and not has_allowed_role:
+        return
+
+    embed = discord.Embed(
+        title="Server Start Up Mode Picker",
+        description="Choose below which mode you are SSUing on",
+        color=embed_color
+    )
+
+    try:
+        await ctx.message.delete()
+    except:
+        pass
+
+    try:
+        await ctx.author.send(embed=embed, view=SSUPollView(ctx.guild))
+    except discord.Forbidden:
+        await ctx.send("I couldn't DM you. Please enable DMs from server members.", delete_after=3)
 
 def get_next_ticket_name(guild, prefix, username):
     safe_name = re.sub(r"[^a-z0-9-]", "", username.lower())
