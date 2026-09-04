@@ -1989,6 +1989,66 @@ async def heal_member(ctx, user: discord.Member = None):
         await ctx.send(f"❌ Unexpected error: {e}")
         print(f"Error: {e}")
 
+@bot.command(name="test")
+async def test_component(ctx: commands.Context):
+    """Test Discord Components V2 payload."""
+    try:
+        await ctx.message.delete()
+    except discord.Forbidden:
+        pass
+    except discord.HTTPException:
+        pass
+
+    payload = {
+        "flags": 1 << 15,  # IS_COMPONENTS_V2
+        "components": [
+            {
+                "type": 17,  # Container
+                "components": [
+                    {
+                        "type": 9,  # Section
+                        "components": [
+                            {
+                                "type": 10,  # Text Display
+                                "content": (
+                                    "## Area-14 Component Test\n\n"
+                                    "This is a test message rendered using Discord's "
+                                    "**Components V2** container format via `a!test`."
+                                ),
+                            }
+                        ],
+                        "accessory": {
+                            "type": 11,  # Thumbnail
+                            "media": {
+                                "url": "https://cdn.discordapp.com/embed/avatars/0.png"
+                            },
+                        },
+                    },
+                    {
+                        "type": 1,  # Action Row
+                        "components": [
+                            {
+                                "type": 2,  # Button
+                                "style": 1,
+                                "label": "System Operational",
+                                "emoji": {"name": "⚙️"},
+                                "disabled": True,
+                                "custom_id": "test_btn_disabled",
+                            }
+                        ],
+                    },
+                ],
+            }
+        ],
+    }
+
+    route = discord.http.Route(
+        "POST",
+        "/channels/{channel_id}/messages",
+        channel_id=ctx.channel.id,
+    )
+    await bot.http.request(route, json=payload)
+
 async def tell_user(ctx, user: discord.Member = None):
     if ctx.author.id not in ALLOWED_CONTROL_USER_IDS:
         print("Wtf?")
