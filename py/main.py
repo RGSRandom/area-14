@@ -8,10 +8,8 @@ import json
 import sys
 import asyncio
 
-
-
 script_path = Path(__file__).resolve()
-repo_root = script_path.parent if script_path.parent.name.lower() != "py" else script_path.parent.parent
+repo_root = script_path.parent.parent if script_path.parent.name.lower() == "py" else script_path.parent
 load_dotenv(dotenv_path=repo_root / '.env')
 
 # Setup logging
@@ -76,8 +74,8 @@ dangerous_perms = load_dangerous_perms()
 try:
     config_path = (repo_root / 'json' / 'config.json').resolve()
     dp_path = (repo_root / 'json' / 'dangerous_perms.json').resolve()
-    logger.info(f"[DEBUG] Loaded config from: {config_path}")
-    logger.info(f"[DEBUG] Loaded dangerous_perms from: {dp_path}")
+    logger.info(f"[DEBUG] Loaded config from: {config_path.resolve()}")
+    logger.info(f"[DEBUG] Loaded dangerous_perms from: {dp_path.resolve()}")
     # Show top-level keys and some key values
     logger.info(f"[DEBUG] config keys: {sorted(list(config.keys()))}")
     logger.info(f"[DEBUG] TARGET_GUILD_ID: {config.get('TARGET_GUILD_ID')}")
@@ -199,7 +197,7 @@ intent = discord.Intents.default()
 intent.message_content = True
 intent.members = True
 
-bot = commands.Bot(command_prefix='a!', intents=intent, help_command=None)   
+bot = commands.Bot(command_prefix='!', intents=intent, help_command=None)   
 
 embed_color = discord.Color.from_rgb(90, 164, 193)
 embed_author_name = {"name": "Area - 14 AIC"}
@@ -663,277 +661,14 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-class GeneralSupportModal(discord.ui.Modal, title="General Support"):
-    roblox = discord.ui.TextInput(
-        label="What is your Roblox username?",
-        required=True,
-        min_length=3,
-        max_length=32
-    )
-
-    issue = discord.ui.TextInput(
-        label="What is your issue?",
-        style=discord.TextStyle.paragraph,
-        required=True
-    ) 
-    async def on_submit(self, interaction: discord.Interaction):
-        STAFF_ROLE_ID = 1389925525312507924
-        everyone = guild.default_role
-        member = interaction.user
-        staff = guild.get_role(STAFF_ROLE_ID)
-        overwrites = {
-            everyone: discord.PermissionOverwrite(view_channel=False),
-            member: discord.PermissionOverwrite(
-                view_channel=True,
-                send_messages=True,
-                read_message_history=True,
-                send_tts_messages=True,
-                embed_links=True,
-                attach_files=True,
-                add_reactions=True,
-                send_voice_messages=True,
-                use_application_commands=True,
-            ),
-            staff: discord.PermissionOverwrite(
-                view_channel=True,
-                send_messages=True,
-                read_message_history=True,
-                manage_messages=True,
-                send_tts_messages=True,
-                embed_links=True,
-                attach_files=True,
-                add_reactions=True,
-                send_voice_messages=True,
-                send_polls=True,
-                use_application_commands=True,
-            )
-        } 
-        guild = interaction.guild
-
-        CATEGORY_ID = 1389925682678730782
-
-        category = guild.get_channel(CATEGORY_ID)
-
-        await guild.create_text_channel(
-            name=f"general-{interaction.user.name}",
-            category=category,
-            overwrites=overwrites
-        )      
-
-class PartnershipSupportModal(discord.ui.Modal, title="Partnership Support"):
-    roblox = discord.ui.TextInput(
-        label="What is your Roblox username?",
-        required=True,
-        min_length=3,
-        max_length=32
-    )
-
-    group = discord.ui.TextInput(
-        label="What is the name of your group?",
-        style=discord.TextStyle.paragraph,
-        required=True
-    )
-    members = discord.ui.TextInput(
-        label="How many members does your group have?",
-        style=discord.TextStyle.short,
-        required=True
-    )
-    type = discord.ui.TextInput(
-        label="What type of group is your group?", 
-        style=discord.TextStyle.short,
-        required=True)
-    
-    owner = discord.ui.TextInput(
-        label="Are you the owner of the group? If not, please provide the owner's username or username ID.",
-        style=discord.TextStyle.short,
-        required=True
-    )
-    async def on_submit(self, interaction: discord.Interaction):
-        STAFF_ROLE_ID = 1389925525312507924
-        everyone = guild.default_role
-        member = interaction.user
-        staff = guild.get_role(STAFF_ROLE_ID)
-        overwrites = {
-            everyone: discord.PermissionOverwrite(view_channel=False),
-            member: discord.PermissionOverwrite(
-                view_channel=True,
-                send_messages=True,
-                read_message_history=True,
-                send_tts_messages=True,
-                embed_links=True,
-                attach_files=True,
-                add_reactions=True,
-                send_voice_messages=True,
-                use_application_commands=True,
-            ),
-            staff: discord.PermissionOverwrite(
-                view_channel=True,
-                send_messages=True,
-                read_message_history=True,
-                manage_messages=True,
-                send_tts_messages=True,
-                embed_links=True,
-                attach_files=True,
-                add_reactions=True,
-                send_voice_messages=True,
-                send_polls=True,
-                use_application_commands=True,
-            )
-        } 
-        guild = interaction.guild
-
-        CATEGORY_ID = 1389925682678730782
-
-        category = guild.get_channel(CATEGORY_ID)
-
-        await guild.create_text_channel(
-            name=f"partnership-{interaction.user.name}",
-            category=category,
-            overwrites=overwrites
-        )
-
-class InGameReportsModal(discord.ui.Modal, title="In-Game Reports"):
-    roblox = discord.ui.TextInput(
-        label="What is your Roblox username?",
-        required=True,
-        min_length=3,
-        max_length=32
-    )
-    reported_user = discord.ui.TextInput(
-        label="What is the username of the user you are reporting?",
-        style=discord.TextStyle.short,
-        required=True
-    )
-    reason = discord.ui.TextInput(
-        label="What is the reason for your report?",
-        style=discord.TextStyle.paragraph,
-        required=True,
-        value="If you do not have proof, please don't submit a report because the user will not be punished."
-    )
-    async def on_submit(self, interaction: discord.Interaction):
-            STAFF_ROLE_ID = 1389925525312507924
-            everyone = guild.default_role
-            member = interaction.user
-            staff = guild.get_role(STAFF_ROLE_ID)
-            overwrites = {
-                everyone: discord.PermissionOverwrite(view_channel=False),
-                member: discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=True,
-                    read_message_history=True,
-                    send_tts_messages=True,
-                    embed_links=True,
-                    attach_files=True,
-                    add_reactions=True,
-                    send_voice_messages=True,
-                    use_application_commands=True,
-                ),
-                staff: discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=True,
-                    read_message_history=True,
-                    manage_messages=True,
-                    send_tts_messages=True,
-                    embed_links=True,
-                    attach_files=True,
-                    add_reactions=True,
-                    send_voice_messages=True,
-                    send_polls=True,
-                    use_application_commands=True,
-                )
-            }             
-            guild = interaction.guild
-
-            CATEGORY_ID = 1509601039412625439
-
-            category = guild.get_channel(CATEGORY_ID)
-
-            await guild.create_text_channel(
-                name=f"report-{interaction.user.name}",
-                category=category,
-                overwrites=overwrites
-            )
-
-class SupportTicketView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(
-            discord.ui.Select(
-                placeholder="Choose a support type",
-                options=[
-                    discord.SelectOption(
-                        label="⚒️  |  General Support",
-                        value="general_support",
-                        description="General questions or inquiries.",
-                    ),
-                    discord.SelectOption(
-                        label="🤝  |  Partnership Support",
-                        value="partnership_support",
-                        description="Partnership discussions or collaborations.",
-                    ),
-                    discord.SelectOption(
-                        label="🎮  |  In-Game Reports",
-                        value="in_game_reports",
-                        description="Report rule-breaking in-game.",
-                    ),
-                ],
-                custom_id="support_ticket_select",
-            )
-        )
-
-    @discord.ui.select(custom_id="support_ticket_select")
-    async def support_select(self, interaction, select):
-        selected_value = select.values[0]
-        labels = {
-            "general_support": "General Support",
-            "partnership_support": "Partnership Support",
-            "in_game_reports": "In-Game Reports",
-        }
-        selected_label = labels.get(selected_value, selected_value)
-        if selected_label == "General Support":
-            await interaction.response.send_modal(GeneralSupportModal())
-            
-        elif selected_label == "Partnership Support":
-            await interaction.response.send_modal(PartnershipSupportModal())
-
-        elif selected_label == "In-Game Reports":
-            await interaction.response.send_modal(InGameReportsModal())
-
-        else: 
-            await interaction.response.send_message(
-                "```⚠︎⚠︎⚠︎ ERROR. CONTACT RGSRANDOM. ⚠︎⚠︎⚠︎```.",
-                ephemeral=True,
-            )
-            return
-
-
-@bot.command(name='&^V1mticket')
+@bot.command(name='ticket')
 async def ticket_command(ctx):
     embed = discord.Embed(
         title="⚒️ | Support Ticket",
         description="Welcome to the support ticket system! Please select the type of support you need from the options below.",
-        color=embed_color,
+        color=discord.Color.blue(),
     )
-    embed.add_field(name="⚒️  |  General Support", value="If you have any general questions or inquiries, please select this option.", inline=False)
-    embed.add_field(name="🤝  |  Partnership Support", value="If you wish to partnership with Area - 14 or discuss partnership collaborations, select this option.", inline=False)
-    embed.add_field(name="🎮  |  In-Game Reports", value="If you wish to report someone rule-breaking in-game, please select this option.", inline=False)
-    embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
-    embed.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
-    await ctx.send(embed=embed, view=SupportTicketView())
-
-@bot.command(name='&^V2ticket')
-async def ticket_command(ctx):
-    embed = discord.Embed(
-        title="⚒️ | Support Ticket",
-        description="Welcome to the support ticket system! Please select the type of support you need from the options below.",
-        color=embed_color,
-    )
-    embed.add_field(name="⚒️  |  General Support", value="If you have any general questions or inquiries, please select this option.", inline=False)
-    embed.add_field(name="🤝  |  Partnership Support", value="If you wish to partnership with Area - 14 or discuss partnership collaborations, select this option.", inline=False)
-    embed.add_field(name="🎮  |  In-Game Reports", value="If you wish to report someone rule-breaking in-game, please select this option.", inline=False)
-    embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
-    embed.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
-    await ctx.send(embed=embed, view=SupportTicketView())
+    await ctx.send(embed=embed)
 
 
 if __name__ == "__main__":

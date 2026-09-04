@@ -1,10 +1,11 @@
 # Discord Bot - Local Run (PowerShell)
 
-$repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$mainFile = Join-Path $repoRoot "main.py"
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repoRoot = Split-Path -Parent $scriptDir
+$mainFile = Join-Path $repoRoot "py\main.py"
 $pidFile = Join-Path $repoRoot "bot_local.pid"
 $taskName = "DiscordBotCloudOnShutdown"
-$taskScript = Join-Path $repoRoot "switch_to_cloud.ps1"
+$taskScript = Join-Path $repoRoot "ps1\switch_to_cloud.ps1"
 $logPath = Join-Path $repoRoot "discord-bot-local.log"
 $localReadyFlag = Join-Path $repoRoot "local_ready.txt"
 
@@ -47,13 +48,13 @@ try {
 }
 
 # Create venv if it doesn't exist
-if (-not (Test-Path (Join-Path $repoRoot "venv"))) {
+if (-not (Test-Path (Join-Path $repoRoot ".venv"))) {
     Write-Host "Creating virtual environment..." -ForegroundColor Yellow
-    python -m venv (Join-Path $repoRoot "venv")
+    python -m venv (Join-Path $repoRoot ".venv")
 }
 
 # Activate venv
-& (Join-Path $repoRoot "venv\Scripts\Activate.ps1")
+& (Join-Path $repoRoot ".venv\Scripts\Activate.ps1")
 
 # Install requirements
 Write-Host "Installing dependencies..." -ForegroundColor Yellow
@@ -70,7 +71,7 @@ if (-not (Test-Path (Join-Path $repoRoot ".env"))) {
 
 # Run bot in the background
 Write-Host "`nStarting bot...`n" -ForegroundColor Green
-$process = Start-Process -FilePath (Join-Path $repoRoot "venv\Scripts\python.exe") -ArgumentList @("-u", $mainFile) -WorkingDirectory $repoRoot -WindowStyle Hidden -RedirectStandardOutput $logPath -RedirectStandardError $logPath -PassThru
+$process = Start-Process -FilePath (Join-Path $repoRoot ".venv\Scripts\python.exe") -ArgumentList @("-u", $mainFile) -WorkingDirectory $repoRoot -WindowStyle Hidden -RedirectStandardOutput $logPath -RedirectStandardError $logPath -PassThru
 $process.Id | Set-Content $pidFile
 Set-Content -Path $localReadyFlag -Value "ready"
 Write-Host "Bot started with PID $($process.Id)" -ForegroundColor Green
