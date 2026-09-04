@@ -1,6 +1,14 @@
+import discord
 from discord.ext import commands
 
 import main
+
+
+async def _delete_invoking_message(ctx):
+    try:
+        await ctx.message.delete()
+    except discord.HTTPException:
+        pass
 
 
 class ModerationCog(commands.Cog):
@@ -25,7 +33,17 @@ class ModerationCog(commands.Cog):
 
     @commands.command(name="pin")
     async def pin(self, ctx):
-        await main.pin_replied_message(ctx)
+        try:
+            await main.pin_replied_message(ctx)
+        finally:
+            await _delete_invoking_message(ctx)
+
+    @commands.command(name="unpin")
+    async def unpin(self, ctx):
+        try:
+            await main.unpin_replied_message(ctx)
+        finally:
+            await _delete_invoking_message(ctx)
 
 
 async def setup(bot):
