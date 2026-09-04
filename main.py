@@ -295,7 +295,7 @@ async def sync_roles():
             # Try to find this member in each configured source guild
             should_have_target_roles = set()
             for source_guild in source_guilds:
-                source_member = await source_guild.fetch_member(target_member.id)
+                source_member = source_guild.get_member(target_member.id)
                 if not source_member:
                     continue
 
@@ -331,6 +331,122 @@ async def sync_roles():
             logger.error(f"Error syncing member {target_member.name}: {e}")
     
     logger.info(f"✅ Periodic sync complete! {synced_count} role changes made")
+
+@bot.event
+async def on_member_update(before, after):
+    # Debug: show before/after role IDs and guild context
+    before_role_ids = {role.id for role in before.roles}
+    after_role_ids = {role.id for role in after.roles}
+    logger.info(f"[DEBUG] on_member_update triggered for user {after.id} in guild {after.guild.id}")
+    logger.info(f"[DEBUG] before roles: {sorted(before_role_ids)}")
+    logger.info(f"[DEBUG] after roles:  {sorted(after_role_ids)}")
+
+    if before_role_ids == after_role_ids:
+        logger.info("[DEBUG] No role changes detected  returning")
+        return  # No role changes
+
+    # Load server IDs from config
+    config_data = load_config()
+    source_guild_ids = get_source_guild_ids(config_data)
+    TARGET_GUILD_ID = config_data["TARGET_GUILD_ID"]
+
+    logger.info(f"[DEBUG] Config source_guild_ids={source_guild_ids}, TARGET_GUILD_ID={TARGET_GUILD_ID}")
+
+    if not is_sync_enabled():
+        logger.info("[DEBUG] Sync is paused; skipping live role update handling")
+        return
+
+    try:
+        if not should_sync_user(after.id, config_data):
+            logger.info(f"[DEBUG] Ignoring member update for {after.id}; not the configured test user")
+            return
+    except ValueError as exc:
+        logger.error(str(exc))
+        return
+
+    # Only trigger if this happened in one of the configured source servers
+    if after.guild.id not in source_guild_ids:
+        logger.info(f"[DEBUG] Event guild {after.guild.id} not in configured source guilds — ignoring")
+        return
+
+    # Get target guild
+    target_guild = bot.get_guild(TARGET_GUILD_ID)
+    if not target_guild:
+        logger.error(f"[DEBUG] Target guild {TARGET_GUILD_ID} not found")
+        return
+
+    # Get the member in the target server
+    target_member = target_guild.get_member(after.id)
+    if not target_member:
+        logger.warning(f"[DEBUG] Member {after.id} not found in target guild")
+        return
+
+    role_mapping = build_role_mapping(config_data)
+    current_dangerous_perms = load_dangerous_perms()
+    logger.info(f"[DEBUG] Role mapping has {len(role_mapping)} entries")
+
+    # Check for roles that were added
+    new_role_ids = after_role_ids - before_role_ids
+    logger.info(f"[DEBUG] New role IDs: {sorted(new_role_ids)}")
+    for added_role_id in new_role_ids:
+        logger.info(f"[DEBUG] Processing added source role id: {added_role_id}")
+        target_role_ids = role_mapping.get(added_role_id)
+        if not target_role_ids:
+            logger.info(f"[DEBUG] No mapping for source role {added_role_id}")
+            continue  # No mapping for this role
+
+        for target_role_id in target_role_ids:
+            try:
+                target_role = target_guild.get_role(target_role_id)
+                if not target_role:
+                    logger.error(f"[DEBUG] Target role {target_role_id} not found")
+                    continue
+
+                dangerous_perms_list = current_dangerous_perms.get("dangerous_permissions", [])
+                role_permissions = target_role.permissions
+
+                dangerous_found = []
+                for perm in dangerous_perms_list:
+                    has = getattr(role_permissions, perm, False)
+                    logger.info(f"[DEBUG] Role '{target_role.name}' perm {perm}: {has}")
+                    if has:
+                        dangerous_found.append(perm)
+
+                if dangerous_found:
+                    logger.warning(f"🚫 BLOCKED: Role '{target_role.name}' has dangerous permissions: {dangerous_found}")
+                    logger.warning(f"   User {after.name} was NOT given this role. Edit dangerous_perms.json if needed.")
+                    continue
+
+                logger.info(f"[DEBUG] Attempting to add role '{target_role.name}' ({target_role.id}) to user {after.id}")
+                await target_member.add_roles(target_role)
+                logger.info(f"✅ Added role '{target_role.name}' to {after.name} in target server")
+
+            except Exception as e:
+                logger.error(f"Error adding role for added role id {added_role_id} -> target {target_role_id}: {e}", exc_info=True)
+
+    # Check for roles that were removed
+    removed_role_ids = before_role_ids - after_role_ids
+    logger.info(f"[DEBUG] Removed role IDs: {sorted(removed_role_ids)}")
+    for removed_role_id in removed_role_ids:
+        logger.info(f"[DEBUG] Processing removed source role id: {removed_role_id}")
+        target_role_ids = role_mapping.get(removed_role_id)
+        if not target_role_ids:
+            logger.info(f"[DEBUG] No mapping for removed source role {removed_role_id}")
+            continue  # No mapping for this role
+
+        for target_role_id in target_role_ids:
+            try:
+                target_role = target_guild.get_role(target_role_id)
+                if not target_role:
+                    logger.error(f"[DEBUG] Target role {target_role_id} not found")
+                    continue
+
+                logger.info(f"[DEBUG] Attempting to remove role '{target_role.name}' ({target_role.id}) from user {after.id}")
+                await target_member.remove_roles(target_role)
+                logger.info(f"🗑️ Removed role '{target_role.name}' from {after.name} in target server")
+
+            except Exception as e:
+                logger.error(f"Error removing role for removed role id {removed_role_id} -> target {target_role_id}: {e}", exc_info=True)
 
 # --- Manual `a!sync` command and concurrency guard ---
 # Track active syncs per target guild to prevent cross-source conflicts
@@ -713,6 +829,68 @@ class InGameReportsModal(discord.ui.Modal, title="In-Game Reports"):
 @bot.event
 async def on_message(message):
     if message.author.bot:
+        return
+
+    content = message.content.strip().lower()
+    if content == 'a!start':
+        if not is_controlled_user(message.author.id):
+            embed = discord.Embed(title="Unauthorized",
+                                  description="You are not authorized to use this command.",
+                                  color=discord.Color.red())
+            await message.channel.send(embed=embed)
+            return
+        set_sync_enabled(True)
+        embed = discord.Embed(title="Sync Started",
+                              description="Role sync has been started.",
+                              color=discord.Color.green())
+        await message.channel.send(embed=embed)
+        return
+
+    if content == 'a!stop':
+        if not is_controlled_user(message.author.id):
+            embed = discord.Embed(title="Unauthorized",
+                                  description="You are not authorized to use this command.",
+                                  color=discord.Color.red())
+            await message.channel.send(embed=embed)
+            return
+        set_sync_enabled(False)
+        embed = discord.Embed(title="Sync Paused",
+                              description="Sync has been paused.",
+                              color=discord.Color.yellow())
+        await message.channel.send(embed=embed)
+        return
+
+    if content == 'a!sync':
+        if not is_controlled_user(message.author.id):
+            embed = discord.Embed(title="Unauthorized",
+                                  description="You are not authorized to use this command.",
+                                  color=discord.Color.red())
+            await message.channel.send(embed=embed)
+            return
+        try:
+            await perform_manual_sync(message)
+        except ValueError as exc:
+            embed = discord.Embed(title="Sync Error",
+                                  description=str(exc),
+                                  color=discord.Color.red())
+            await message.channel.send(embed=embed)
+        return
+    if content == 'a!debug':
+        # Provide a quick debug dump to the invoking channel
+        config_data = load_config()
+        dangerous_perms_data = load_dangerous_perms()
+        source_guild_ids = get_source_guild_ids(config_data)
+        role_mapping = build_role_mapping(config_data)
+        lines = [
+            f"Debug dump:",
+            f"Bot ID: {bot.user.id}",
+            f"Members intent: {bot.intents.members}",
+            f"Source guild IDs: {source_guild_ids}",
+            f"Target guild ID: {config_data['TARGET_GUILD_ID']}",
+            f"Role mappings loaded: {len(role_mapping)} entries",
+            f"Dangerous permissions loaded: {len(dangerous_perms_data.get('dangerous_permissions', []))}"
+        ]
+        await message.channel.send("\n".join(lines))
         return
 
     await bot.process_commands(message)
