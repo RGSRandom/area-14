@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manage Users - A14MAIL</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="app">
+        <aside class="sidebar">
+            <div class="brand"><div class="brand-mark">A14</div>A14MAIL</div>
+            <a class="nav-link" href="{{ url_for('inbox') }}">Inbox</a>
+            <a class="nav-link" href="{{ url_for('sent') }}">Sent</a>
+            <a class="nav-link" href="{{ url_for('compose') }}">Compose</a>
+            <a class="nav-link active" href="{{ url_for('admin_users') }}">Users</a>
+            <a class="nav-link" href="{{ url_for('logout') }}">Logout</a>
+            <div class="sidebar-foot">{{ user }} · Admin</div>
+        </aside>
+
+        <main class="main">
+            <div class="page-head">
+                <div>
+                    <h2>Users</h2>
+                    <p>Change passwords. They are hashed automatically.</p>
+                </div>
+            </div>
+
+            {% with messages = get_flashed_messages() %}
+                {% if messages %}
+                    <p class="success">{{ messages[0] }}</p>
+                {% endif %}
+            {% endwith %}
+
+            <div class="panel">
+                <table>
+                    <tr>
+                        <th>Email</th>
+                        <th>Name</th>
+                        <th>Role</th>
+                        <th>Password</th>
+                    </tr>
+                    {% for u in users %}
+                    <tr>
+                        <td>{{ u.email }}</td>
+                        <td>{{ u.name }}</td>
+                        <td>{{ u.role }}</td>
+                        <td>
+                            <form method="POST" action="{{ url_for('admin_change_password') }}" class="inline-form">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="email" value="{{ u.email }}">
+                                <input type="password" name="new_password" placeholder="New password" required>
+                                <button type="submit">Change</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </table>
+            </div>
+        </main>
+    </div>
+</body>
+</html>
