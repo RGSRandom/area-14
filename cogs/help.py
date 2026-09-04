@@ -26,13 +26,13 @@ class HelpCog(commands.Cog):
                 f"`{prefix}dm <userid> <message>` - Send a direct message",
             ])
 
-        if main.is_allowed_ticket_staff(ctx.author.id):
+        if main.is_allowed_ticket_staff(ctx.author):
             lines.extend([
                 f"`{prefix}add @user` - Add someone to a ticket",
                 f"`{prefix}remove @user` - Remove someone from a ticket",
             ])
 
-        if main.is_allowed_ssu_staff(ctx.author.id):
+        if main.is_allowed_ssu_staff(ctx.author):
             lines.extend([
                 f"`{prefix}ssu` - Open the SSU mode picker",
                 f"`{prefix}poll <time>` - Create an SSU poll",

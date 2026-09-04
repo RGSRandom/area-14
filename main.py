@@ -199,15 +199,24 @@ def get_test_user_id(config_data=None):
     return int(test_user_id)
 
 
-def get_config_user_ids(config_data, key):
-    raw_user_ids = config_data.get(key, [])
-    if not isinstance(raw_user_ids, list):
-        raw_user_ids = [raw_user_ids]
+def get_config_ids(config_data, key):
+    raw_ids = config_data.get(key, [])
+    if not isinstance(raw_ids, list):
+        raw_ids = [raw_ids]
     return {
-        int(user_id)
-        for user_id in raw_user_ids
-        if user_id not in (None, "")
+        int(identifier)
+        for identifier in raw_ids
+        if identifier not in (None, "")
     }
+
+
+def get_config_user_ids(config_data, key):
+    return get_config_ids(config_data, key)
+
+
+def is_member_in_configured_roles(member, config_data, key):
+    configured_role_ids = get_config_ids(config_data, key)
+    return any(role.id in configured_role_ids for role in member.roles)
 
 
 def is_test_mode_enabled(config_data=None):
@@ -238,16 +247,20 @@ def is_controlled_user(user_id):
     return user_id in ALLOWED_CONTROL_USER_IDS
 
 
-def is_allowed_ticket_staff(user_id, config_data=None):
+def is_allowed_ticket_staff(member, config_data=None):
     if config_data is None:
         config_data = load_config()
-    return user_id in get_config_user_ids(config_data, "ALLOWED_TICKET_STAFF_IDS")
+    return is_member_in_configured_roles(
+        member, config_data, "ALLOWED_TICKET_STAFF_ROLE_IDS"
+    )
 
 
-def is_allowed_ssu_staff(user_id, config_data=None):
+def is_allowed_ssu_staff(member, config_data=None):
     if config_data is None:
         config_data = load_config()
-    return user_id in get_config_user_ids(config_data, "ALLOWED_SSU_STAFF_IDS")
+    return is_member_in_configured_roles(
+        member, config_data, "ALLOWED_SSU_STAFF_ROLE_IDS"
+    )
 
 
 def is_sync_enabled():
@@ -1783,7 +1796,7 @@ def is_ticket_channel(channel: discord.abc.GuildChannel) -> bool:
 
 
 async def add_to_ticket(ctx, user: discord.Member = None):
-    if ctx.author.id not in get_config_user_ids(load_config(), "ALLOWED_TICKET_STAFF_IDS"):
+    if not is_allowed_ticket_staff(ctx.author):
         await ctx.send(
             embed=error_embed(
                 "Permission Denied",
@@ -1846,7 +1859,7 @@ async def add_to_ticket(ctx, user: discord.Member = None):
     await ctx.send(embed=embed)
 
 async def remove_from_ticket(ctx, user: discord.Member = None):
-    if ctx.author.id not in get_config_user_ids(load_config(), "ALLOWED_TICKET_STAFF_IDS"):
+    if not is_allowed_ticket_staff(ctx.author):
         await ctx.send(
             embed=error_embed(
                 "Permission Denied",
@@ -2195,7 +2208,7 @@ SSU_POLL_CHANNEL_ID = 1300133949972021348
 
 # ---------- Reaction Poll Command ----------
 async def create_poll(ctx, *, time: str = None):
-    if ctx.author.id not in get_config_user_ids(load_config(), "ALLOWED_SSU_STAFF_IDS"):
+    if not is_allowed_ssu_staff(ctx.author):
         return
 
     if time is None:
@@ -2241,7 +2254,7 @@ class SSUPollView(discord.ui.View):
         self.guild = guild
 
     async def check_permission(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id in get_config_user_ids(load_config(), "ALLOWED_SSU_STAFF_IDS"):
+        if is_allowed_ssu_staff(interaction.user):
             return True
 
         await interaction.followup.send("Access Denied.", ephemeral=True)
@@ -2285,7 +2298,7 @@ class SSUPollView(discord.ui.View):
 
 
 async def ssu_command(ctx):
-    if ctx.author.id not in get_config_user_ids(load_config(), "ALLOWED_SSU_STAFF_IDS"):
+    if not is_allowed_ssu_staff(ctx.author):
         return
 
     embed = discord.Embed(
@@ -3810,7 +3823,7 @@ class StaffTicketView(discord.ui.View):
             return
 
 async def ticket_commandmain(ctx):
-    if not is_allowed_ticket_staff(ctx.author.id):
+    if not is_allowed_ticket_staff(ctx.author):
         return
 
     embed = info_embed(
@@ -3825,7 +3838,7 @@ async def ticket_commandmain(ctx):
     await ctx.send(embed=embed, view=SupportTicketView())
 
 async def ticket_commandhub(ctx):
-    if not is_allowed_ticket_staff(ctx.author.id):
+    if not is_allowed_ticket_staff(ctx.author):
         return
 
     embed = info_embed(
