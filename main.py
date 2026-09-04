@@ -260,6 +260,17 @@ def get_test_user_id(config_data=None):
     return int(test_user_id)
 
 
+def get_bot_developer_id(config_data=None):
+    if config_data is None:
+        config_data = load_config()
+    developer_ids = config_data.get("BOT_DEVELOPER_ID")
+    if developer_ids in (None, ""):
+        return set()
+    if not isinstance(developer_ids, list):
+        developer_ids = [developer_ids]
+    return {int(developer_id) for developer_id in developer_ids}
+
+
 def get_config_ids(config_data, key):
     raw_ids = config_data.get(key, [])
     if not isinstance(raw_ids, list):
@@ -308,6 +319,10 @@ def is_controlled_user(user_id):
     return user_id in ALLOWED_CONTROL_USER_IDS
 
 
+class TestModeCommandFailure(commands.CheckFailure):
+    pass
+
+
 def is_allowed_ticket_staff(member, config_data=None):
     if is_controlled_user(member.id):
         return True
@@ -343,6 +358,20 @@ intent.members = True
 intent.guilds=True
 
 bot = commands.Bot(command_prefix='a!', intents=intent, help_command=None)   
+
+
+@bot.check
+async def test_mode_command_check(ctx):
+    if not is_test_mode_enabled():
+        return True
+
+    developer_ids = get_bot_developer_id()
+    if ctx.author.id in developer_ids:
+        return True
+
+    raise TestModeCommandFailure(
+        "Commands are currently limited to the bot developer."
+    )
 
 embed_color = discord.Color.from_rgb(90, 164, 193)
 embed_author_name = {"name": "Area - 14 AIC"}
@@ -1964,7 +1993,7 @@ async def notify_faction_leader(
             leader = await bot.fetch_user(int(leader_id))
         if action == "issued":
             title = "Punishment Issued"
-            description = "A punishment has been issued to your faction. Please review your punishment log to see if you are able to appeal your punishment. Follow all proper methods to appeal your punishment.\n\n*DO NOT appeal in these DMs*\n*DO NOT appeal in a staff members DMs*\n*DO NOT complain about your punishment in general chat*"
+            description = "A punishment has been issued to your faction. Please review your punishment log to see if you are able to appeal your punishment. Follow all proper methods to appeal your punishment."
         else:
             title = "Punishment Log Updated"
             description = "Your faction's punishment log has been updated."
@@ -2249,6 +2278,9 @@ async def revoke(ctx, punishment_id: str):
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandOnCooldown):
         return
+    if isinstance(error, TestModeCommandFailure):
+        await ctx.send("Test mode is enabled. Only the bot developer can use commands right now.")
+        return
     else:
         raise error
 
@@ -2413,6 +2445,11 @@ async def on_message(message):
     if message.author.bot:
         return
 
+    if bot.user is not None and bot.user in message.mentions:
+        await message.author.send(
+            "Hi there, run `a!help` to see a list of available commands"
+        )
+
     if message.content.startswith("fuck you"):
         await message.channel.send("No, fuck you.")
     elif message.content.startswith(("no fuck you", "No, fuck you.", "No fuck you")):
@@ -2481,6 +2518,9 @@ async def imgaybro(ctx):
         return
 
     await ctx.send("https://media.discordapp.net/attachments/1300134615356407828/1544811666418565160/Screenshot_2026-09-02_201006.png?ex=6a99dd7a&is=6a988bfa&hm=81671035923fd36789666771cd29f33acee350da0423ab06523c0ecc9aa9e05c&=&format=webp&quality=lossless")
+
+
+
 
 
 
@@ -2641,7 +2681,7 @@ async def pin_replied_message(ctx):
             )
         )
         return
-
+# 
     reference = ctx.message.reference
     if reference is None or reference.message_id is None:
         await ctx.send(
@@ -2702,6 +2742,88 @@ async def pin_replied_message(ctx):
         embed=success_embed(
             "Message Pinned",
             f"[Open the pinned message]({message.jump_url})",
+            requested_by=ctx.author,
+        )
+    )
+
+
+async def unpin_replied_message(ctx):
+    if not ctx.guild or (
+        not ctx.author.guild_permissions.manage_messages
+        and not is_controlled_user(ctx.author.id)
+    ):
+        await ctx.send(
+            embed=error_embed(
+                "Permission Denied",
+                "You need the **Manage Messages** permission to use this command.",
+                requested_by=ctx.author,
+            )
+        )
+        return
+
+    reference = ctx.message.reference
+    if reference is None or reference.message_id is None:
+        await ctx.send(
+            embed=error_embed(
+                "Reply Required",
+                "Use `a!unpin` as a reply to the message you want to unpin.",
+                requested_by=ctx.author,
+            )
+        )
+        return
+
+    try:
+        message = reference.resolved
+        if not isinstance(message, discord.Message):
+            message = await ctx.channel.fetch_message(reference.message_id)
+
+        bot_member = ctx.guild.me
+        if (
+            bot_member is None
+            or not ctx.channel.permissions_for(bot_member).manage_messages
+        ):
+            await ctx.send(
+                embed=error_embed(
+                    "Unpin Failed",
+                    "I need the **Manage Messages** permission in this channel.",
+                    requested_by=ctx.author,
+                )
+            )
+            return
+
+        await message.unpin(reason=f"Unpinned by {ctx.author}")
+    except discord.NotFound:
+        await ctx.send(
+            embed=error_embed(
+                "Unpin Failed",
+                "I could not find the message you replied to.",
+                requested_by=ctx.author,
+            )
+        )
+        return
+    except discord.Forbidden:
+        await ctx.send(
+            embed=error_embed(
+                "Unpin Failed",
+                "Discord denied the unpin request. Check my channel permissions.",
+                requested_by=ctx.author,
+            )
+        )
+        return
+    except discord.HTTPException as exc:
+        await ctx.send(
+            embed=error_embed(
+                "Unpin Failed",
+                f"Discord rejected the unpin request: `{exc}`",
+                requested_by=ctx.author,
+            )
+        )
+        return
+
+    await ctx.send(
+        embed=success_embed(
+            "Message Unpinned",
+            f"[Open the unpinned message]({message.jump_url})",
             requested_by=ctx.author,
         )
     )
