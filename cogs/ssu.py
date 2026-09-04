@@ -11,7 +11,7 @@ class SsuCog(commands.Cog):
     @commands.cooldown(1, 300, commands.BucketType.default)
     @commands.cooldown(1, 600, commands.BucketType.user)
     async def beg(self, ctx):
-        if not main.is_allowed_ssu_staff(ctx.author.id):
+        if not main.is_allowed_ssu_staff(ctx.author):
             return
         await main.beg(ctx)
 
