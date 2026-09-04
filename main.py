@@ -855,7 +855,7 @@ class GeneralSupportModal(discord.ui.Modal, title="General Support"):
         required=True
     ) 
     async def on_submit(self, interaction: discord.Interaction):
-        STAFF_ROLE_ID = 1363831936153555195
+        STAFF_ROLE_ID = 1300119792241475604
         CATEGORY_ID = 1389925525312507924
 
         guild = interaction.guild
@@ -983,7 +983,7 @@ class GeneralSupportModal(discord.ui.Modal, title="General Support"):
 
         close_button.callback = close_callback
         view.add_item(close_button)
-        await ticket_channel.send(content=f"{member.mention}", embeds=[embed, embed1], view=view)
+        await ticket_channel.send(content=f"{member.mention} <@&{STAFF_ROLE_ID}>", embeds=[embed, embed1], view=view)
 
 
 class PartnershipSupportModal(discord.ui.Modal, title="Partnership Support"):
@@ -1129,7 +1129,7 @@ class PartnershipSupportModal(discord.ui.Modal, title="Partnership Support"):
 
         close_button.callback = close_callback
         view.add_item(close_button)
-        await ticket_channel.send(content=f"{member.mention}", embeds=[embed, embed1], view=view)       
+        await ticket_channel.send(content=f"{member.mention} <@&{STAFF_ROLE_ID}>", embeds=[embed, embed1], view=view)       
 
 class InGameReportsModal(discord.ui.Modal, title="In-Game Reports"):
     roblox = discord.ui.TextInput(
@@ -1149,7 +1149,7 @@ class InGameReportsModal(discord.ui.Modal, title="In-Game Reports"):
         required=True,
     )
     async def on_submit(self, interaction: discord.Interaction):
-            STAFF_ROLE_ID = 1363831936153555195
+            STAFF_ROLE_ID = 1300124748235280395
             CATEGORY_ID = 1509601039412625439
 
             guild = interaction.guild
@@ -1263,7 +1263,7 @@ class InGameReportsModal(discord.ui.Modal, title="In-Game Reports"):
 
             close_button.callback = close_callback
             view.add_item(close_button)
-            await ticket_channel.send(content=f"{member.mention}", embeds=[embed, embed1], view=view)
+            await ticket_channel.send(content=f"{member.mention} <@&{STAFF_ROLE_ID}>", embeds=[embed, embed1], view=view)
 
 def get_excluded_role_ids(config_data=None):
     if config_data is None:
