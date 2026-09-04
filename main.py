@@ -808,7 +808,6 @@ class InGameReportsModal(discord.ui.Modal, title="In-Game Reports"):
         label="What is the reason for your report?",
         style=discord.TextStyle.paragraph,
         required=True,
-        value="If you do not have proof, please don't submit a report because the user will not be punished."
     )
     async def on_submit(self, interaction: discord.Interaction):
             STAFF_ROLE_ID = 1389925525312507924
