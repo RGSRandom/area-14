@@ -112,7 +112,7 @@
     {
       "_comment": "Foundation Intelligence Agency",
       "source_role_id": 1516435085010800711,
-      "target_role_id": 1516439573415202946
+      "target_role_id": 1543155981553242153
     },
     {
       "_comment": "Department of Science & Research",
@@ -133,6 +133,51 @@
       "_comment": "Beta-1 \"Cauterizers\" SPEC",
       "source_role_id": 1502381704927641802,
       "target_role_id": 1513296241000316948
+    },
+    {
+      "_comment": "Faction Management",
+      "source_role_id": 1346192810998501396,
+      "target_role_id": 1426201912197382184
+    },
+    {
+      "_comment": "FHR FD",
+      "source_role_id": 1350190125988053012,
+      "target_role_id": 1300135236843339797
+    },
+    {
+      "_comment": "EFHR FD",
+      "source_role_id": 1370761432068657235,
+      "target_role_id": 1300135236843339797 
+    },
+    {
+      "_comment": "FHC FD",
+      "source_role_id": 1350190228526075977,
+      "target_role_id": 1300135236843339797
+    },
+    {
+      "_comment": "EFHC FD",
+      "source_role_id": 1370761438251057235,
+      "target_role_id": 1300135236843339797
+    },
+    {
+      "_comment": "FL FD",
+      "source_role_id": 1350190129888624852,
+      "target_role_id": 1370761438251057235
+    },
+    {
+      "_comment": "EFL FD",
+      "source_role_id": 1370761435994652682,
+      "target_role_id": 1300135236843339797
+    },
+    {
+      "_comment": "DDD FD",
+      "source_role_id": 1375888776491962378,
+      "target_role_id": 1300135236843339797
+    },
+    {
+      "_comment": "DD FD",
+      "source_role_id": 1345168738307281116,
+      "target_role_id": 1300135236843339797
     }
   ]
 }

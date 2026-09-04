@@ -1,12 +1,5 @@
 {
   "dangerous_permissions": [
-    "administrator",
-    "ban_members",
-    "kick_members",
-    "manage_guild",
-    "manage_channels",
-    "manage_roles",
-    "manage_webhooks",
-    "manage_messages"
+    "administrator"
   ]
 }
