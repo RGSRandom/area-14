@@ -55,6 +55,7 @@ dangerous_perms_path = (repo_root / 'json' / 'dangerous_perms.json').resolve()
 
 channel_log_id = 1533412186850988093
 channel_log_ticket = 1533516881305145435
+channel_log_ticket_hub = 1379696175053148210
 
 active_ticket_creations = set()
 
@@ -292,6 +293,7 @@ async def on_ready():
     if not views_loaded:
         views_loaded = True
         bot.add_view(SupportTicketView())
+        bot.add_view(StaffTicketView())
         bot.add_view(ApprovalView())   # ← no argument
 
 @tasks.loop(minutes=60)
@@ -1412,25 +1414,73 @@ def get_highest_punishment(punishments, faction_id, ptype):
         return ""
     return f"{'Warning' if ptype == 'warning' else 'Strike'}-{max(levels)}"
 
+@bot.command(name="show")
+async def show_punishment(ctx, punishment_id: str = None):
+    # Delete the trigger message
+    try:
+        await ctx.message.delete()
+    except:
+        pass
 
-@bot.command(name="appeal")
-async def appeal(ctx, punishment_id: str):
+    if punishment_id is None:
+        await ctx.send("Usage: `a!show <Punishment ID>`", delete_after=5)
+        return
+
+    # ===== Role check =====
+    fm_role = 1346192810998501396
+    user_role_ids = [role.id for role in ctx.author.roles]
+
+    if fm_role not in user_role_ids:
+        return
+
     punishments = load_punishments()
     found = None
 
     for entry in punishments:
         if entry["punishment_id"] == punishment_id:
-            # Check appeal status immediately upon finding the ID
-            if entry.get("appealable") == False:
+            found = entry
+            break
+
+    if not found:
+        await ctx.send(f"Punishment ID `{punishment_id}` not found.", delete_after=5)
+        return
+
+    embed = discord.Embed(
+        title=f"Showing punishment information for `{punishment_id}`",
+        color=embed_color
+    )
+    embed.add_field(name="Faction Name", value=found.get("faction_name", "N/A"), inline=True)
+    embed.add_field(name="Punishment", value=found.get("punishment", "N/A"), inline=True)
+    embed.add_field(name="Appealable", value="Yes" if found.get("appealable") else "No", inline=True)
+    embed.add_field(name="Reason", value=found.get("reason", "N/A"), inline=False)
+    embed.add_field(name="Proof", value=found.get("proof", "N/A"), inline=False)
+
+    embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
+
+    await ctx.send(embed=embed)
+
+@bot.command(name="appeal")
+async def appeal(ctx, punishment_id: str):
+    # ===== Role check =====
+    fm_role = 1346192810998501396
+    user_role_ids = [role.id for role in ctx.author.roles]
+
+    if fm_role not in user_role_ids:
+        return
+
+    punishments = load_punishments()
+    found = None
+
+    for entry in punishments:
+        if entry["punishment_id"] == punishment_id:
+            if entry.get("appealable") is False:
                 await ctx.send("This punishment is unappealable.")
-                return  # Instantly stops the command
-            
-            # If it passes the check, mark it as found and appealed
+                return
+
             entry["status"] = "appealed"
             found = entry
             break
 
-    # If the loop finishes and 'found' is still None, the ID doesn't exist
     if not found:
         await ctx.send("Punishment ID not found.")
         return
@@ -1440,15 +1490,14 @@ async def appeal(ctx, punishment_id: str):
     # ===== Recalculate and update Google Sheet =====
     try:
         sheet = gc.open_by_key(SPREADSHEET_KEY).worksheet("Infractions Database")
-        sheet_main = gc.open_by_key(SPREADSHEET_KEY).worksheet("Faction Database")
         cell = sheet.find(found["faction_id"], in_column=3)
         row = cell.row
 
         highest_warning = get_highest_punishment(punishments, found["faction_id"], "warning")
         highest_strike = get_highest_punishment(punishments, found["faction_id"], "strike")
 
-        sheet.update_cell(row, 7, highest_warning) 
-        sheet.update_cell(row, 6, highest_strike)  
+        sheet.update_cell(row, 7, highest_warning)
+        sheet.update_cell(row, 6, highest_strike)
 
         sheet.update_note(f"G{row}", f"Last appealed: {punishment_id}" if highest_warning else "")
         sheet.update_note(f"F{row}", f"Last appealed: {punishment_id}" if highest_strike else "")
@@ -1459,20 +1508,28 @@ async def appeal(ctx, punishment_id: str):
 
     await ctx.send(f"Punishment `{punishment_id}` marked as **Appealed**.")
 
-    # ===== NEW: Reply to original punishment message =====
+    # ===== Reply to original punishment message =====
     channel = bot.get_channel(PUNISH_CHANNEL_ID)
     msg_id = found.get("message_id")
-    
+
     if channel and msg_id:
         try:
             original_msg = await channel.fetch_message(msg_id)
-            await original_msg.reply(f"Punishment **appealed**.")
+            await original_msg.reply("Punishment **appealed**.")
         except discord.NotFound:
-            pass # The message was deleted from the channel
+            pass
 
 
 @bot.command(name="revoke")
 async def revoke(ctx, punishment_id: str):
+    # ===== Role check =====
+    fm_role = 1346192810998501396
+    user_role_ids = [role.id for role in ctx.author.roles]
+
+    if fm_role not in user_role_ids:
+        await ctx.send("You do not have permission to use this command.")
+        return
+
     punishments = load_punishments()
     found = None
 
@@ -1491,7 +1548,6 @@ async def revoke(ctx, punishment_id: str):
     # ===== Recalculate and update Google Sheet =====
     try:
         sheet = gc.open_by_key(SPREADSHEET_KEY).worksheet("Infractions Database")
-        sheet_main = gc.open_by_key(SPREADSHEET_KEY).worksheet("Faction Database")
         cell = sheet.find(found["faction_id"], in_column=3)
         row = cell.row
 
@@ -1508,18 +1564,18 @@ async def revoke(ctx, punishment_id: str):
         await ctx.send(f"JSON updated but failed to update sheet: `{e}`")
         return
 
-    await ctx.send(f"Punishment `{punishment_id}` marked as **REVOKED**.\nSheet updated to highest remaining active punishments.")
+    await ctx.send(f"Punishment `{punishment_id}` marked as **REVOKED**.")
 
-    # ===== NEW: Reply to original punishment message =====
+    # ===== Reply to original punishment message =====
     channel = bot.get_channel(PUNISH_CHANNEL_ID)
     msg_id = found.get("message_id")
-    
+
     if channel and msg_id:
         try:
             original_msg = await channel.fetch_message(msg_id)
-            await original_msg.reply(f"**REVOKED.**")
+            await original_msg.reply("**REVOKED.**")
         except discord.NotFound:
-            pass # The message was deleted from the channel
+            pass
 
 
 @bot.event
@@ -2512,6 +2568,810 @@ class InGameReportsModal(discord.ui.Modal, title="In-Game Reports"):
         finally:
             active_ticket_creations.discard(member.id)
 
+class GeneralSupportModalH(discord.ui.Modal, title="General Support"):
+    roblox = discord.ui.TextInput(
+        label="What is your Roblox username?",
+        required=True,
+        min_length=3,
+        max_length=32
+    )
+
+    issue = discord.ui.TextInput(
+        label="What is your issue?",
+        style=discord.TextStyle.paragraph,
+        required=True
+    ) 
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        STAFF_ROLE_ID = 1346192810998501396
+        CATEGORY_ID = 1383014801399349268
+
+        member = interaction.user
+
+        if member.id in active_ticket_creations:
+            await interaction.followup.send(
+                "You are already creating a ticket. Please wait a moment.",
+                ephemeral=True
+            )
+            return
+
+        active_ticket_creations.add(member.id)
+        try:
+            guild = interaction.guild
+            everyone = guild.default_role
+            member = interaction.user
+            staff = guild.get_role(STAFF_ROLE_ID)
+            category = guild.get_channel(CATEGORY_ID)
+
+            if staff is None or category is None:
+                await interaction.followup.send(
+                    "Staff role or category is missing. Contact an admin.",
+                    ephemeral=True
+                )
+                return
+
+            print(f"Guild: {guild}")
+            print(f"Staff role: {staff}")
+            print(f"Staff role ID: {STAFF_ROLE_ID}")
+            print(f"Category ID: {CATEGORY_ID}")
+            overwrites = {
+                everyone: discord.PermissionOverwrite(view_channel=False),
+                member: discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    read_message_history=True,
+                    send_tts_messages=True,
+                    embed_links=True,
+                    attach_files=True,
+                    add_reactions=True,
+                    send_voice_messages=True,
+                    use_application_commands=True,
+                ),
+                staff: discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    read_message_history=True,
+                    manage_messages=True,
+                    send_tts_messages=True,
+                    embed_links=True,
+                    attach_files=True,
+                    add_reactions=True,
+                    send_voice_messages=True,
+                    send_polls=True,
+                    use_application_commands=True,
+                )
+            } 
+
+            category = guild.get_channel(CATEGORY_ID)
+
+            ticket_name = get_next_ticket_name(
+                guild,
+                "general",
+                interaction.user.name
+            )
+            existing_ticket = None
+
+            for channel in category.text_channels:
+                if channel.name.startswith(f"general-{re.sub(r'[^a-z0-9-]', '', interaction.user.name.lower())}"):
+                    existing_ticket = channel
+                    break
+
+            if existing_ticket:
+                await interaction.followup.send(
+                    f"You already have an open ticket: {existing_ticket.mention}",
+                    ephemeral=True
+                )
+                return
+            ticket_channel = await guild.create_text_channel(
+                    name=ticket_name,
+                    category=category,
+                    overwrites=overwrites
+            )
+
+            embed = discord.Embed(
+                title="General Support",
+                description=f"Welcome. Staff will be with you shortly. In the meantime, please explain the issue thoroughly. If you wish to close the ticket, click the 🔒 button.",
+                color=embed_color)
+            embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
+            embed1 = discord.Embed(
+                title="Report Details",
+                color=embed_color)
+            embed1.add_field(name="What is your Roblox username?", value=f'```{self.roblox.value}```', inline=False)
+            embed1.add_field(name="What is your issue?", value=f'```{self.issue.value}```', inline=False)
+            embed1.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
+
+            view = discord.ui.View()
+
+            close_button = discord.ui.Button(
+                    label="Close and Log",
+                    style=discord.ButtonStyle.red,
+                    emoji="🔒"
+            )
+
+            async def close_callback(interaction: discord.Interaction):
+                embed = discord.Embed(
+                    title="Ticket Closed",
+                    description=f"Ticket closed by {interaction.user.mention}. This ticket will be deleted in a few seconds.",
+                    color=discord.Color.red()
+                )
+                await interaction.response.defer(ephemeral=True)
+                
+
+                if interaction.user != member and (staff is None or staff not in interaction.user.roles):
+                    await interaction.followup.send(
+                        "You cannot close this ticket.",
+                        ephemeral=True
+                    )
+                    return
+
+                await interaction.followup.send(embed=embed)
+
+                # Prevent double-clicks firing multiple closes
+                for item in view.children:
+                    item.disabled = True
+                try:
+                    await interaction.message.edit(view=view)
+                except Exception:
+                    pass
+
+                transcript = await chat_exporter.export(interaction.channel, limit=None)
+                if transcript is None:
+                    await interaction.followup.send(
+                        "Transcript couldn't be generated.",
+                        ephemeral=True
+                    )
+                    return
+
+                log_channel = bot.get_channel(channel_log_ticket_hub)
+                if log_channel is None:
+                    await interaction.followup.send(
+                        "Log channel not found.",
+                        ephemeral=True
+                    )
+                    return
+
+                embed = discord.Embed(
+                    title="Ticket Logged",
+                    description=f"Ticket closed by {interaction.user.mention}. Transcript attached.",
+                    color=embed_color
+                )
+                embed.set_author(
+                    name=embed_author_name["name"],
+                    icon_url=embed_author_icon["icon_url"]
+                )
+                embed.set_footer(
+                    text=embed_footer_text["text"],
+                    icon_url=embed_footer_icon["icon_url"]
+                )
+
+                # No temp file on disk → no WinError 32
+                file = discord.File(
+                    fp=io.BytesIO(transcript.encode("utf-8")),
+                    filename=f"{interaction.channel.name}.html"
+                )
+                await log_channel.send(file=file, embed=embed)
+
+                try:
+                    await interaction.channel.delete()
+                except discord.NotFound:
+                    pass  # already deleted by a concurrent close
+                except discord.HTTPException as e:
+                    logger.error(f"Failed to delete ticket channel: {e}")
+
+            close_button.callback = close_callback
+            view.add_item(close_button)
+            await interaction.followup.send(
+                f"Ticket created: {ticket_channel.mention}",
+                ephemeral=True
+            )
+            await ticket_channel.send(content=f"{member.mention} <@&{STAFF_ROLE_ID}>", embeds=[embed, embed1], view=view)
+        finally: 
+            active_ticket_creations.discard(member.id)
+
+class StaffReportModalH(discord.ui.Modal, title="Staff Report"):
+    roblox = discord.ui.TextInput(
+        label="What is your Roblox username?",
+        required=True,
+        min_length=3,
+        max_length=32
+    )
+    staff_member = discord.ui.TextInput(
+        label="Which staff member are you reporting?",
+        style=discord.TextStyle.short,
+        placeholder="Codename/username, anything that helps us identify the staff member.",
+        required=True
+    )
+    reason = discord.ui.TextInput(
+        label="Why are you reporting this staff member?",
+        style=discord.TextStyle.paragraph,
+        required=True
+    )
+    actions = discord.ui.TextInput(
+        label="What actions do you wish that they recieve?", 
+        style=discord.TextStyle.paragraph,
+        required=True)
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        STAFF_ROLE_ID = 1523264806012850337
+        CATEGORY_ID = 1526569434901119056
+        member = interaction.user
+
+        if member.id in active_ticket_creations:
+            await interaction.followup.send(
+                "You are already creating a ticket. Please wait a moment.",
+                ephemeral=True
+            )
+            return
+        active_ticket_creations.add(member.id)
+        try:
+            guild = interaction.guild
+            everyone = guild.default_role
+            member = interaction.user
+            staff = guild.get_role(STAFF_ROLE_ID)
+            category = guild.get_channel(CATEGORY_ID)
+
+            if staff is None or category is None:
+                await interaction.followup.send(
+                    "Staff role or category is missing. Contact an admin.",
+                    ephemeral=True
+                )
+                return
+            
+            overwrites = {
+                everyone: discord.PermissionOverwrite(view_channel=False),
+                member: discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    read_message_history=True,
+                    send_tts_messages=True,
+                    embed_links=True,
+                    attach_files=True,
+                    add_reactions=True,
+                    send_voice_messages=True,
+                    use_application_commands=True,
+                ),
+                staff: discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    read_message_history=True,
+                    manage_messages=True,
+                    send_tts_messages=True,
+                    embed_links=True,
+                    attach_files=True,
+                    add_reactions=True,
+                    send_voice_messages=True,
+                    send_polls=True,
+                    use_application_commands=True,
+                )
+            } 
+
+            category = guild.get_channel(CATEGORY_ID)
+
+            ticket_name = get_next_ticket_name(
+            guild,
+            "staff-report",
+            interaction.user.name
+            )
+            existing_ticket = None
+
+            for channel in category.text_channels:
+                if channel.name.startswith(f"staff-report-{re.sub(r'[^a-z0-9-]', '', interaction.user.name.lower())}"):
+                    existing_ticket = channel
+                    break
+
+            if existing_ticket:
+                await interaction.followup.send(
+                    f"You already have an open ticket: {existing_ticket.mention}",
+                    ephemeral=True
+                )
+                return
+            ticket_channel = await guild.create_text_channel(
+                name=ticket_name,
+                category=category,
+                overwrites=overwrites
+            )
+        
+            embed = discord.Embed(
+                title="Staff Report",
+                description=f"Welcome. Staff will be with you shortly. In the meantime, please explain the issue thoroughly. If you wish to close the ticket, click the 🔒   button.",
+                color=embed_color)
+            embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
+            embed1 = discord.Embed(
+                title="Report Details",
+                color=embed_color)
+            embed1.add_field(name="What is your Roblox username?", value=f'```{self.roblox.value}```', inline=False)
+            embed1.add_field(name="Which staff member are you reporting?", value=f'```{self.staff_member.value}```', inline=False)
+            embed1.add_field(name="Why are you reporting this staff member?", value=f'```{self.reason.value}```', inline=False)
+            embed1.add_field(name="What actions do you want to be taken against this staff member?", value=f'```{self.actions.value}```', inline=False)
+            embed1.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
+
+            view = discord.ui.View()
+
+            close_button = discord.ui.Button(
+                    label="Close and Log",
+                    style=discord.ButtonStyle.red,
+                    emoji="🔒"
+            )
+
+            async def close_callback(interaction: discord.Interaction):
+                embed = discord.Embed(
+                    title="Ticket Closed",
+                    description=f"Ticket closed by {interaction.user.mention}. This ticket will be deleted in a few seconds.",
+                    color=discord.Color.red()
+                )
+                await interaction.response.defer(ephemeral=True)
+
+                if interaction.user != member and (staff is None or staff not in interaction.user.roles):
+                    await interaction.followup.send(
+                        "You cannot close this ticket.",
+                        ephemeral=True
+                    )
+                    return
+
+                await interaction.followup.send(embed=embed)
+
+                # Prevent double-clicks firing multiple closes
+                for item in view.children:
+                    item.disabled = True
+                try:
+                    await interaction.message.edit(view=view)
+                except Exception:
+                    pass
+
+                transcript = await chat_exporter.export(interaction.channel, limit=None)
+                if transcript is None:
+                    await interaction.followup.send(
+                        "Transcript couldn't be generated.",
+                        ephemeral=True
+                    )
+                    return
+
+                log_channel = bot.get_channel(1527607159020589066)
+                if log_channel is None:
+                    await interaction.followup.send(
+                        "Log channel not found.",
+                        ephemeral=True
+                    )
+                    return
+
+                embed = discord.Embed(
+                    title="Ticket Logged",
+                    description=f"Ticket closed by {interaction.user.mention}. Transcript attached.",
+                    color=embed_color
+                )
+                embed.set_author(
+                    name=embed_author_name["name"],
+                    icon_url=embed_author_icon["icon_url"]
+                )
+                embed.set_footer(
+                    text=embed_footer_text["text"],
+                    icon_url=embed_footer_icon["icon_url"]
+                )
+
+                # No temp file on disk → no WinError 32
+                file = discord.File(
+                    fp=io.BytesIO(transcript.encode("utf-8")),
+                    filename=f"{interaction.channel.name}.html"
+                )
+                await log_channel.send(file=file, embed=embed)
+
+                try:
+                    await interaction.channel.delete()
+                except discord.NotFound:
+                    pass  # already deleted by a concurrent close
+                except discord.HTTPException as e:
+                    logger.error(f"Failed to delete ticket channel: {e}")
+
+            close_button.callback = close_callback
+            view.add_item(close_button)
+            await interaction.followup.send(
+                f"Ticket created: {ticket_channel.mention}",
+                ephemeral=True
+            )
+            await ticket_channel.send(content=f"{member.mention} <@&{STAFF_ROLE_ID}>", embeds=[embed, embed1], view=view)  
+        finally: 
+            active_ticket_creations.discard(member.id)
+
+
+class FactionReportsModal(discord.ui.Modal, title="Faction Reports"):
+    faction_name = discord.ui.TextInput(
+        label="Faction Name",
+        required=True,
+        min_length=3,
+        max_length=32
+    )
+    faction_id = discord.ui.TextInput(
+        label="Faction ID",
+        style=discord.TextStyle.short,
+        required=True
+    )
+    reason = discord.ui.TextInput(
+        label="Reason for the report",
+        style=discord.TextStyle.paragraph,
+        required=True,
+    )
+    proof = discord.ui.TextInput(
+        label="Do you have valid proof?",
+        style=discord.TextStyle.paragraph,
+        placeholder="Yes/No",
+        required=True,
+    )
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        STAFF_ROLE_ID = 1346192810998501396
+        CATEGORY_ID = 1383014862300647464
+        member = interaction.user
+
+        if member.id in active_ticket_creations:
+            await interaction.followup.send(
+                "You are already creating a ticket. Please wait a moment.",
+                ephemeral=True
+            )
+            return
+
+        active_ticket_creations.add(member.id)
+        try:
+            guild = interaction.guild
+            everyone = guild.default_role
+            staff = guild.get_role(STAFF_ROLE_ID)
+            category = guild.get_channel(CATEGORY_ID)
+
+            if staff is None or category is None:
+                await interaction.followup.send(
+                    "Staff role or category is missing. Contact an admin.",
+                    ephemeral=True
+                )
+                return
+
+            # Check for existing ticket
+            for channel in category.text_channels:
+                if channel.name.startswith(f"report-{re.sub(r'[^a-z0-9-]', '', interaction.user.name.lower())}"):
+                    await interaction.followup.send(
+                        f"You already have an open ticket: {channel.mention}",
+                        ephemeral=True
+                    )
+                    return
+
+            overwrites = {
+                everyone: discord.PermissionOverwrite(view_channel=False),
+                member: discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    read_message_history=True,
+                    embed_links=True,
+                    attach_files=True,
+                    add_reactions=True,
+                ),
+                staff: discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    read_message_history=True,
+                    manage_messages=True,
+                    embed_links=True,
+                    attach_files=True,
+                    add_reactions=True,
+                )
+            }
+
+            ticket_name = get_next_ticket_name(guild, "report", interaction.user.name)
+
+            ticket_channel = await guild.create_text_channel(
+                name=ticket_name,
+                category=category,
+                overwrites=overwrites
+            )
+
+            embed = discord.Embed(
+                title="Faction Report",
+                description="Welcome. Staff will be with you shortly. In the meantime, please explain the issue thoroughly. If you wish to close the ticket, click the 🔒 button.",
+                color=embed_color
+            )
+            embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
+
+            embed1 = discord.Embed(title="Report Details", color=embed_color)
+            embed1.add_field(name="Faction Name", value=f"```{self.faction_name.value}```", inline=False)
+            embed1.add_field(name="Faction ID", value=f"```{self.faction_id.value}```", inline=False)
+            embed1.add_field(name="Reason", value=f"```{self.reason.value}```", inline=False)
+            embed1.add_field(name="Proof", value=f"```{self.proof.value}```", inline=False)
+            embed1.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
+
+            # === Create the view + button properly ===
+            view = discord.ui.View(timeout=None)
+
+            close_button = discord.ui.Button(
+                label="Close and Log",
+                style=discord.ButtonStyle.red,
+                emoji="🔒"
+            )
+
+            async def close_callback(interaction: discord.Interaction):
+                if interaction.user != member and (staff is None or staff not in interaction.user.roles):
+                    await interaction.response.send_message("You cannot close this ticket.", ephemeral=True)
+                    return
+
+                await interaction.response.defer(ephemeral=True)
+
+                # Disable buttons
+                for item in view.children:
+                    item.disabled = True
+                try:
+                    await interaction.message.edit(view=view)
+                except Exception:
+                    pass
+
+                embed_closed = discord.Embed(
+                    title="Ticket Closed",
+                    description=f"Ticket closed by {interaction.user.mention}. This ticket will be deleted in a few seconds.",
+                    color=discord.Color.red()
+                )
+                await interaction.followup.send(embed=embed_closed)
+
+                transcript = await chat_exporter.export(interaction.channel, limit=None)
+                if transcript is None:
+                    await interaction.followup.send("Transcript couldn't be generated.", ephemeral=True)
+                    return
+
+                log_channel = bot.get_channel(channel_log_ticket_hub)
+                if log_channel is None:
+                    await interaction.followup.send("Log channel not found.", ephemeral=True)
+                    return
+
+                embed_log = discord.Embed(
+                    title="Ticket Logged",
+                    description=f"Ticket closed by {interaction.user.mention}. Transcript attached.",
+                    color=embed_color
+                )
+                embed_log.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
+                embed_log.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
+
+                file = discord.File(
+                    fp=io.BytesIO(transcript.encode("utf-8")),
+                    filename=f"{interaction.channel.name}.html"
+                )
+                await log_channel.send(file=file, embed=embed_log)
+
+                try:
+                    await interaction.channel.delete()
+                except (discord.NotFound, discord.HTTPException):
+                    pass
+
+            close_button.callback = close_callback
+            view.add_item(close_button)
+
+            # Send everything
+            await ticket_channel.send(
+                content=f"{member.mention} <@&{STAFF_ROLE_ID}>",
+                embeds=[embed, embed1],
+                view=view
+            )
+
+            await interaction.followup.send(
+                f"Ticket created: {ticket_channel.mention}",
+                ephemeral=True
+            )
+
+        finally:
+            active_ticket_creations.discard(member.id)
+
+class AppealSupportModal(discord.ui.Modal, title="Faction Appeals"):
+    faction_name = discord.ui.TextInput(
+        label="Faction Name",
+        required=True,
+        min_length=3,
+        max_length=32
+    )
+    faction_id = discord.ui.TextInput(
+        label="Faction ID",
+        style=discord.TextStyle.short,
+        required=True
+    )
+    punishment_id = discord.ui.TextInput(
+        label="Punishment ID",
+        style=discord.TextStyle.short,
+        required=True,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        STAFF_ROLE_ID = 1346192810998501396
+        CATEGORY_ID = 1383014709732708414
+        member = interaction.user
+
+        if member.id in active_ticket_creations:
+            await interaction.followup.send(
+                "You are already creating a ticket. Please wait a moment.",
+                ephemeral=True
+            )
+            return
+
+        # ===== Validate punishment ID first =====
+        punishments = load_punishments()
+        found = None
+
+        for entry in punishments:
+            if entry["punishment_id"] == self.punishment_id.value:
+                found = entry
+                break
+
+        if not found:
+            await interaction.followup.send(
+                f"Punishment ID `{self.punishment_id.value}` not found.",
+                ephemeral=True
+            )
+            return
+
+        if found.get("appealable") is False:
+            await interaction.followup.send(
+                "This punishment is marked as **unappealable**. If you wish to discuss that punishment or believe this is a mistake, please open a general support ticket.",
+                ephemeral=True
+            )
+            return
+
+        if found.get("status") != "active":
+            await interaction.followup.send(
+                f"This punishment is not active (current status: `{found.get('status')}`).",
+                ephemeral=True
+            )
+            return
+
+        active_ticket_creations.add(member.id)
+        try:
+            guild = interaction.guild
+            everyone = guild.default_role
+            staff = guild.get_role(STAFF_ROLE_ID)
+            category = guild.get_channel(CATEGORY_ID)
+
+            if staff is None or category is None:
+                await interaction.followup.send(
+                    "Staff role or category is missing. Contact an admin.",
+                    ephemeral=True
+                )
+                return
+
+            # Check for existing ticket
+            safe_name = re.sub(r'[^a-z0-9-]', '', interaction.user.name.lower())
+            for channel in category.text_channels:
+                if channel.name.startswith(f"appeal-{safe_name}"):
+                    await interaction.followup.send(
+                        f"You already have an open ticket: {channel.mention}",
+                        ephemeral=True
+                    )
+                    return
+
+            overwrites = {
+                everyone: discord.PermissionOverwrite(view_channel=False),
+                member: discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    read_message_history=True,
+                    embed_links=True,
+                    attach_files=True,
+                    add_reactions=True,
+                ),
+                staff: discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    read_message_history=True,
+                    manage_messages=True,
+                    embed_links=True,
+                    attach_files=True,
+                    add_reactions=True,
+                )
+            }
+
+            ticket_name = get_next_ticket_name(guild, "appeal", interaction.user.name)
+
+            ticket_channel = await guild.create_text_channel(
+                name=ticket_name,
+                category=category,
+                overwrites=overwrites
+            )
+
+            # Welcome embed
+            embed = discord.Embed(
+                title="Faction Appeal",
+                description="Welcome. Staff will be with you shortly. In the meantime, please explain why you are appealing this punishment. If you wish to close the ticket, click the 🔒 button.",
+                color=embed_color
+            )
+            embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
+
+            # User submitted details
+            embed1 = discord.Embed(title="Appeal Details", color=embed_color)
+            embed1.add_field(name="Faction Name", value=f"```{self.faction_name.value}```", inline=False)
+            embed1.add_field(name="Faction ID", value=f"```{self.faction_id.value}```", inline=False)
+            embed1.add_field(name="Punishment ID", value=f"```{self.punishment_id.value}```", inline=False)
+            embed1.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
+
+            # Punishment info embed
+            embed2 = discord.Embed(
+                title=f"Punishment Info — `{self.punishment_id.value}`",
+                color=embed_color
+            )
+            embed2.add_field(name="Faction Name", value=found.get("faction_name", "N/A"), inline=True)
+            embed2.add_field(name="Punishment", value=found.get("punishment", "N/A"), inline=True)
+            embed2.add_field(name="Status", value=str(found.get("status", "N/A")).upper(), inline=True)
+            embed2.add_field(name="Appealable", value="Yes" if found.get("appealable") else "No", inline=True)
+            embed2.add_field(name="Reason", value=found.get("reason", "N/A"), inline=False)
+            embed2.add_field(name="Proof", value=found.get("proof", "N/A"), inline=False)
+            embed2.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
+
+            # Close button
+            view = discord.ui.View(timeout=None)
+            close_button = discord.ui.Button(
+                label="Close and Log",
+                style=discord.ButtonStyle.red,
+                emoji="🔒"
+            )
+
+            async def close_callback(interaction: discord.Interaction):
+                if interaction.user != member and (staff is None or staff not in interaction.user.roles):
+                    await interaction.response.send_message("You cannot close this ticket.", ephemeral=True)
+                    return
+
+                await interaction.response.defer(ephemeral=True)
+
+                for item in view.children:
+                    item.disabled = True
+                try:
+                    await interaction.message.edit(view=view)
+                except Exception:
+                    pass
+
+                embed_closed = discord.Embed(
+                    title="Ticket Closed",
+                    description=f"Ticket closed by {interaction.user.mention}. This ticket will be deleted in a few seconds.",
+                    color=discord.Color.red()
+                )
+                await interaction.followup.send(embed=embed_closed)
+
+                transcript = await chat_exporter.export(interaction.channel, limit=None)
+                if transcript is None:
+                    await interaction.followup.send("Transcript couldn't be generated.", ephemeral=True)
+                    return
+
+                log_channel = bot.get_channel(channel_log_ticket)
+                if log_channel is None:
+                    await interaction.followup.send("Log channel not found.", ephemeral=True)
+                    return
+
+                embed_log = discord.Embed(
+                    title="Ticket Logged",
+                    description=f"Ticket closed by {interaction.user.mention}. Transcript attached.",
+                    color=embed_color
+                )
+                embed_log.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
+                embed_log.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
+
+                file = discord.File(
+                    fp=io.BytesIO(transcript.encode("utf-8")),
+                    filename=f"{interaction.channel.name}.html"
+                )
+                await log_channel.send(file=file, embed=embed_log)
+
+                try:
+                    await interaction.channel.delete()
+                except (discord.NotFound, discord.HTTPException):
+                    pass
+
+            close_button.callback = close_callback
+            view.add_item(close_button)
+
+            await ticket_channel.send(
+                content=f"{member.mention} <@&{STAFF_ROLE_ID}>",
+                embeds=[embed, embed1, embed2],
+                view=view
+            )
+
+            await interaction.followup.send(
+                f"Ticket created: {ticket_channel.mention}",
+                ephemeral=True
+            )
+
+        finally:
+            active_ticket_creations.discard(member.id)
+
 def get_excluded_role_ids(config_data=None):
     if config_data is None:
         config_data = load_config()
@@ -2564,11 +3424,61 @@ class SupportTicketView(discord.ui.View):
             )
             return
 
+class StaffTicketView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+    @discord.ui.select(
+        custom_id="support_ticket_select",
+        placeholder="Select a ticket category...",
+        options=[
+            discord.SelectOption(
+                label="⚒️  |  General Support",
+                value="general_support",
+                description="If you have any general questions or inquiries, please select this option."
+            ),
+            discord.SelectOption(
+                label="👮  |  Staff Report",
+                value="staff_report",
+                description="Report a faction management member breaking rules."
+            ),
+            discord.SelectOption(
+                label="📋  |  Faction Report",
+                value="faction_report",
+                description="If you wish to report factions breaking regulations, select this option."
+            ),
+            discord.SelectOption(
+                label="🔓  |  Appeal Support",
+                value="appeal_support",
+                description="If you wish to appeal a faction infraction, select this option."
+            ),
+        ],
+    )
+    async def support_select(self, interaction: discord.Interaction, select: discord.ui.Select):
+        selected_value = select.values[0]
+
+        if selected_value == "general_support":
+            await interaction.response.send_modal(GeneralSupportModalH())
+
+        elif selected_value == "staff_report":
+            await interaction.response.send_modal(StaffReportModalH())
+
+        elif selected_value == "faction_report":
+            await interaction.response.send_modal(FactionReportsModal())
+
+        elif selected_value == "appeal_support":
+            await interaction.response.send_modal(AppealSupportModal())
+        else:
+            await interaction.followup.send(
+                "```⚠︎⚠︎⚠︎ ERROR. CONTACT RGSRANDOM. ⚠︎⚠︎⚠︎```.",
+                ephemeral=True,
+            )
+            return
+
 @bot.command(name='&^V1mticket')
 async def ticket_commandmain(ctx):
     embed = discord.Embed(
         title="⚒️ | Support Ticket",
-        description="Welcome to the support ticket system! Please select the type of support you need from the options below.",
+        description="**Welcome to the support ticket system! Please select the type of support you need from the options below.**",
         color=embed_color,
     )
 
@@ -2578,6 +3488,22 @@ async def ticket_commandmain(ctx):
     embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
     embed.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
     msg = await ctx.send(embed=embed, view=SupportTicketView())
+
+@bot.command(name='&^V2hticket')
+async def ticket_commandmain(ctx):
+    embed = discord.Embed(
+        title="⚒️ | Support Ticket",
+        description="**Welcome to the support ticket system! Please select the type of support you need from the options below.**",
+        color=embed_color,
+    )
+
+    embed.add_field(name="⚒️  |  General Support", value="If you have any general questions or inquiries, please select this option.", inline=False)
+    embed.add_field(name="👮  |  Staff Report", value="If you wish to report a staff member breaking rules, select this option.", inline=False)
+    embed.add_field(name="📋  |  Faction Report", value="If you wish to report factions breaking regulations, select this option.", inline=False)
+    embed.add_field(name="🔓  |  Appeal Support", value="If you wish to appeal a faction infraction, select this option.", inline=False)
+    embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
+    embed.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
+    msg = await ctx.send(embed=embed, view=StaffTicketView())
 
 if __name__ == "__main__":
     if not token:
