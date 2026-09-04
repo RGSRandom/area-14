@@ -5,8 +5,13 @@ __pycache__/
 *$py.class
 *.so
 .Python
+.venv/
 venv/
 ENV/
 env/
 .vscode/
 .DS_Store
+bot_local.pid
+local_ready.txt
+json/loaded_config_debug.json
+json/loaded_dangerous_perms_debug.json
