@@ -50,6 +50,8 @@ dangerous_perms_path = (repo_root / 'json' / 'dangerous_perms.json').resolve()
 channel_log_id = 1533412186850988093
 channel_log_ticket = 1533516881305145435
 
+active_ticket_creations = set()
+
 # Load config files helper functions
 def load_config():
     try:
@@ -497,7 +499,8 @@ async def on_member_update(before, after):
                     color=embed_color
                 )
                 embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
-                embed.set_footer(text=after.name, icon_url=after.display_avatar.url)               
+                embed.set_footer(text=after.name, icon_url=after.display_avatar.url)   
+                await channel.send(embed=embed)            
                 logger.error(f"Error syncing member {target_member.name}: {e}", exc_info=True)
 
     # Check for roles that were removed
@@ -721,7 +724,7 @@ async def perform_manual_sync(ctx):
                     logger.info(f"Startup Sync: {processed}/{total_members} members - {changes} changes")
                 await asyncio.sleep(0.5)
         except Exception:
-            pass
+            logger.exception("Progress updater crashed")
 
     progress_task = asyncio.create_task(progress_updater())
 
@@ -858,6 +861,20 @@ class GeneralSupportModal(discord.ui.Modal, title="General Support"):
         STAFF_ROLE_ID = 1300119792241475604
         CATEGORY_ID = 1389925525312507924
 
+        member = interaction.user
+
+        if member.id in active_ticket_creations:
+            await interaction.response.send_message(
+                "You are already creating a ticket. Please wait a moment.",
+                ephemeral=True
+            )
+            return
+        await interaction.followup.send(
+            f"Ticket created: {ticket_channel.mention}",
+            ephemeral=True
+        )
+        active_ticket_creations.add(member.id)
+
         guild = interaction.guild
         everyone = guild.default_role
         member = interaction.user
@@ -902,18 +919,19 @@ class GeneralSupportModal(discord.ui.Modal, title="General Support"):
             "general",
             interaction.user.name
         )
+        existing_ticket = None
 
-        await guild.create_text_channel(
-            name=ticket_name,
-            category=category,
-            overwrites=overwrites
-        )
-        ticket_name = get_next_ticket_name(
-        guild,
-        "partnership",
-        interaction.user.name
-        )
-        
+        for channel in category.text_channels:
+            if channel.name.startswith(f"general-{re.sub(r'[^a-z0-9-]', '', interaction.user.name.lower())}"):
+                existing_ticket = channel
+                break
+
+        if existing_ticket:
+            await interaction.response.send_message(
+                f"You already have an open ticket: {existing_ticket.mention}",
+                ephemeral=True
+            )
+            return
         ticket_channel = await guild.create_text_channel(
                 name=ticket_name,
                 category=category,
@@ -961,10 +979,11 @@ class GeneralSupportModal(discord.ui.Modal, title="General Support"):
                     f.write(transcript)
             log_channel = bot.get_channel(channel_log_ticket)
 
-            filename = f"{interaction.channel.name}.html"
+            if log_channel is None:
+                print(f"Couldn't find log channel ({channel_log_ticket})")
+                return
 
-            with open(filename, "w", encoding="utf-8") as f:
-                    f.write(transcript)
+            filename = f"{interaction.channel.name}.html"
 
             embed = discord.Embed(
                     title="Ticket Logged",
@@ -973,13 +992,16 @@ class GeneralSupportModal(discord.ui.Modal, title="General Support"):
                 )
             embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
             embed.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
-            await log_channel.send(
-                    embed=embed,
-                    file=discord.File(filename)
-                )
+            try:
+                with open(filename, "w", encoding="utf-8") as f:
+                        f.write(transcript)
+                await log_channel.send(file=discord.File(filename),embed=embed)
+                await interaction.channel.delete()
 
-            os.remove(filename)
-            await interaction.channel.delete()
+            finally:
+                active_ticket_creations.discard(member.id)
+                if os.path.exists(filename):
+                    os.remove(filename)
 
         close_button.callback = close_callback
         view.add_item(close_button)
@@ -1018,6 +1040,20 @@ class PartnershipSupportModal(discord.ui.Modal, title="Partnership Support"):
     async def on_submit(self, interaction: discord.Interaction):
         STAFF_ROLE_ID = 1363831936153555195
         CATEGORY_ID = 1389925682678730782
+        member = interaction.user
+
+        if member.id in active_ticket_creations:
+            await interaction.response.send_message(
+                "You are already creating a ticket. Please wait a moment.",
+                ephemeral=True
+            )
+            return
+        
+        await interaction.followup.send(
+            f"Ticket created: {ticket_channel.mention}",
+            ephemeral=True
+        )
+        active_ticket_creations.add(member.id)
 
         guild = interaction.guild
         everyone = guild.default_role
@@ -1058,12 +1094,25 @@ class PartnershipSupportModal(discord.ui.Modal, title="Partnership Support"):
         "partnership",
         interaction.user.name
         )
-        
+        existing_ticket = None
+
+        for channel in category.text_channels:
+            if channel.name.startswith(f"partnership-{re.sub(r'[^a-z0-9-]', '', interaction.user.name.lower())}"):
+                existing_ticket = channel
+                break
+
+        if existing_ticket:
+            await interaction.response.send_message(
+                f"You already have an open ticket: {existing_ticket.mention}",
+                ephemeral=True
+            )
+            return
         ticket_channel = await guild.create_text_channel(
             name=ticket_name,
             category=category,
             overwrites=overwrites
         )
+    
         embed = discord.Embed(
             title="In-Game Report",
             description=f"Welcome. Staff will be with you shortly. In the meantime, please explain the issue thoroughly. If you wish to close the ticket, click the 🔒button.",
@@ -1073,7 +1122,8 @@ class PartnershipSupportModal(discord.ui.Modal, title="Partnership Support"):
             title="Report Details",
             color=embed_color)
         embed1.add_field(name="What is your Roblox username?", value=f'```{self.roblox.value}```', inline=False)
-        embed1.add_field(name="What is the name of your group?", value=f'```{self.group_name.value}```', inline=False)
+        embed1.add_field(name="What is the name of your group?", value=f'```{self.group.value}```', inline=False)
+        embed1.add_field(name="How many members does your group have?", value=f'```{self.members.value}```', inline=False)
         embed1.add_field(name="What type of group is your group?", value=f'```{self.type.value}```', inline=False)
         embed1.add_field(name="Are you the group owner?", value=f'```{self.owner.value}```', inline=False)
         embed1.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
@@ -1087,6 +1137,7 @@ class PartnershipSupportModal(discord.ui.Modal, title="Partnership Support"):
         )
 
         async def close_callback(interaction: discord.Interaction):
+            ticket_failed = True
             if interaction.user != member and staff not in interaction.user.roles:
                 await interaction.response.send_message(
                         "You cannot close this ticket.",
@@ -1103,14 +1154,13 @@ class PartnershipSupportModal(discord.ui.Modal, title="Partnership Support"):
                         ephemeral=True
                     )
                     return
-            with open(f"{interaction.channel.name}.html", "w", encoding="utf-8") as f:
-                    f.write(transcript)
             log_channel = bot.get_channel(channel_log_ticket)
 
-            filename = f"{interaction.channel.name}.html"
+            if log_channel is None:
+                print(f"Couldn't find log channel ({channel_log_ticket})")
+                return
 
-            with open(filename, "w", encoding="utf-8") as f:
-                    f.write(transcript)
+            filename = f"{interaction.channel.name}.html"
 
             embed = discord.Embed(
                     title="Ticket Logged",
@@ -1119,13 +1169,18 @@ class PartnershipSupportModal(discord.ui.Modal, title="Partnership Support"):
                 )
             embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
             embed.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
-            await log_channel.send(
-                    embed=embed,
-                    file=discord.File(filename)
-                )
+            ticket_failed = False
+            try:
+                with open(filename, "w", encoding="utf-8") as f:
+                        f.write(transcript)
+                await log_channel.send(file=discord.File(filename),embed=embed)
+                await interaction.channel.delete()
 
-            os.remove(filename)
-            await interaction.channel.delete()
+            finally:
+                if ticket_failed:
+                    active_ticket_creations.discard(member.id)
+                if os.path.exists(filename):
+                    os.remove(filename)
 
         close_button.callback = close_callback
         view.add_item(close_button)
@@ -1151,6 +1206,19 @@ class InGameReportsModal(discord.ui.Modal, title="In-Game Reports"):
     async def on_submit(self, interaction: discord.Interaction):
             STAFF_ROLE_ID = 1300124748235280395
             CATEGORY_ID = 1509601039412625439
+            member = interaction.user
+
+            if member.id in active_ticket_creations:
+                await interaction.response.send_message(
+                    "You are already creating a ticket. Please wait a moment.",
+                    ephemeral=True
+                )
+                return
+            await interaction.followup.send(
+                f"Ticket created: {ticket_channel.mention}",
+                ephemeral=True
+            )
+            active_ticket_creations.add(member.id)            
 
             guild = interaction.guild
             everyone = guild.default_role
@@ -1192,7 +1260,19 @@ class InGameReportsModal(discord.ui.Modal, title="In-Game Reports"):
                 "report",
                 interaction.user.name
             )
-            
+            existing_ticket = None
+
+            for channel in category.text_channels:
+                if channel.name.startswith(f"reports-{re.sub(r'[^a-z0-9-]', '', interaction.user.name.lower())}"):
+                    existing_ticket = channel
+                    break
+
+            if existing_ticket:
+                await interaction.response.send_message(
+                    f"You already have an open ticket: {existing_ticket.mention}",
+                    ephemeral=True
+                )
+                return
             ticket_channel = await guild.create_text_channel(
                 name=ticket_name,
                 category=category,
@@ -1215,7 +1295,7 @@ class InGameReportsModal(discord.ui.Modal, title="In-Game Reports"):
             view = discord.ui.View()
 
             close_button = discord.ui.Button(
-                label="Close",
+                label="Close & Log",
                 style=discord.ButtonStyle.red,
                 emoji="🔒"
             )
@@ -1241,10 +1321,11 @@ class InGameReportsModal(discord.ui.Modal, title="In-Game Reports"):
                     f.write(transcript)
                 log_channel = bot.get_channel(channel_log_ticket)
 
-                filename = f"{interaction.channel.name}.html"
+                if log_channel is None:
+                    print(f"Couldn't find log channel ({channel_log_ticket})")
+                    return
 
-                with open(filename, "w", encoding="utf-8") as f:
-                    f.write(transcript)
+                filename = f"{interaction.channel.name}.html"
 
                 embed = discord.Embed(
                     title="Ticket Logged",
@@ -1253,13 +1334,17 @@ class InGameReportsModal(discord.ui.Modal, title="In-Game Reports"):
                 )
                 embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
                 embed.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
-                await log_channel.send(
-                    embed=embed,
-                    file=discord.File(filename)
-                )
 
-                os.remove(filename)
-                await interaction.channel.delete()
+                try:
+                    with open(filename, "w", encoding="utf-8") as f:
+                        f.write(transcript)
+                    await log_channel.send(file=discord.File(filename),embed=embed)
+                    await interaction.channel.delete()
+
+                finally:
+                    active_ticket_creations.discard(member.id)
+                    if os.path.exists(filename):
+                        os.remove(filename)
 
             close_button.callback = close_callback
             view.add_item(close_button)
