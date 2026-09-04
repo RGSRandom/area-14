@@ -8,6 +8,7 @@ import json
 import sys
 import asyncio
 import re
+import chat_exporter
 
 script_path = Path(__file__).resolve()
 repo_root = script_path.parent if script_path.parent.name.lower() != "py" else script_path.parent.parent
@@ -47,6 +48,7 @@ config_file_path = (repo_root / 'json' / 'config.json').resolve()
 dangerous_perms_path = (repo_root / 'json' / 'dangerous_perms.json').resolve()
 
 channel_log_id = 1533412186850988093
+channel_log_ticket = 1533516881305145435
 
 # Load config files helper functions
 def load_config():
@@ -346,7 +348,7 @@ async def sync_roles():
                         color=embed_color
                     )
                     embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
-                    embed.set_footer(text=target_member.name, icon_url=target_member.avatar.url)
+                    embed.set_footer(text=target_member.name, icon_url=target_member.display_avatar.url)
                     await channel.send(embed=embed)
                     logger.info(f"🗑️ Sync removed '{role.name}' from {target_member.name}")
                     synced_count += 1
@@ -365,7 +367,7 @@ async def sync_roles():
                         color=embed_color
                     )
                     embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
-                    embed.set_footer(text=target_member.name, icon_url=target_member.avatar.url)
+                    embed.set_footer(text=target_member.name, icon_url=target_member.display_avatar.url)
 
                     await channel.send(embed=embed)
                     logger.info(f"✅ Sync added <@&{role.id}> to {target_member.name}")
@@ -465,7 +467,7 @@ async def on_member_update(before, after):
                         color=embed_color
                     )
                     embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
-                    embed.set_footer(name=after.name, icon_url=after.avatar.url)
+                    embed.set_footer(text=after.name, icon_url=after.display_avatar.url)
                     await channel.send (embed=embed)
                     logger.warning(f"🚫 BLOCKED: Role '{target_role.name}' has dangerous permissions: {dangerous_found}")
                     logger.warning(f"   User {after.name} was NOT given this role. Edit dangerous_perms.json if needed.")
@@ -481,7 +483,7 @@ async def on_member_update(before, after):
                     color=embed_color
                 )
                 embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
-                embed.set_footer(text=after.name, icon_url=after.avatar.url)
+                embed.set_footer(text=after.name, icon_url=after.display_avatar.url)
 
                 await channel.send(embed=embed)
                 logger.info(f"✅ Added role '{target_role.name}' to {after.name} in target server")
@@ -491,12 +493,12 @@ async def on_member_update(before, after):
 
                 embed = discord.Embed(
                     title="🔒  |  ERROR",
-                    description=f"Error adding role for added role id {added_role_id} -> target {target_role_id}: {e}",
+                    description=f"Error syncing {target_member.mention}: {e}",
                     color=embed_color
                 )
                 embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
-                embed.set_footer(text=after.name, icon_url=after.avatar.url)               
-                logger.error(f"Error adding role for added role id {added_role_id} -> target {target_role_id}: {e}", exc_info=True)
+                embed.set_footer(text=after.name, icon_url=after.display_avatar.url)               
+                logger.error(f"Error syncing member {target_member.name}: {e}", exc_info=True)
 
     # Check for roles that were removed
     removed_role_ids = before_role_ids - after_role_ids
@@ -525,7 +527,7 @@ async def on_member_update(before, after):
                     color=embed_color
                 )
                 embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
-                embed.set_footer(text=after.name, icon_url=after.avatar.url)
+                embed.set_footer(text=after.name, icon_url=after.display_avatar.url)
                 await channel.send(embed=embed)
                 logger.info(f"🗑️ Removed role '{target_role.name}' from {after.name} in target server")
 
@@ -769,7 +771,7 @@ async def perform_manual_sync(ctx):
                             color=embed_color
                         )
                         embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
-                        embed.set_footer(text=target_member.name, icon_url=target_member.avatar.url)
+                        embed.set_footer(text=target_member.name, icon_url=target_member.display_avatar.url)
                         await channel.send(embed=embed)
                         logger.info(f"Removed '{role.name}' from {target_member.name}")
                         changes += 1
@@ -793,7 +795,7 @@ async def perform_manual_sync(ctx):
                             color=embed_color
                         )
                         embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
-                        embed.set_footer(text=target_member.name, icon_url=target_member.avatar.url)
+                        embed.set_footer(text=target_member.name, icon_url=target_member.display_avatar.url)
 
                         await channel.send(embed=embed)
                         logger.info(f"Added '{role.name}' to {target_member.name}")
@@ -806,12 +808,12 @@ async def perform_manual_sync(ctx):
 
                 embed = discord.Embed(
                     title="🔒  |  ERROR",
-                    description=f"Error adding role for added role id {role_id} -> target {target_member.name}: {e}",
+                    description=f"Error syncing {target_member.mention}: {e}",
                     color=embed_color
                 )
                 embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
-                embed.set_footer(text=target_member.name, icon_url=target_member.avatar.url) 
-                logger.error(f"Error syncing member {target_member.name}: {e}")
+                embed.set_footer(text=target_member.name, icon_url=target_member.display_avatar.url) 
+                logger.error(f"Error syncing member {target_member.name}: {e}", exc_info=True)
 
         stop_progress = True
         await progress_task
@@ -826,6 +828,18 @@ async def perform_manual_sync(ctx):
     finally:
         active_sync_targets.discard(TARGET_GUILD_ID)
 
+def get_next_ticket_name(guild, prefix, username):
+    safe_name = re.sub(r"[^a-z0-9-]", "", username.lower())
+
+    base_name = f"{prefix}-{safe_name}"
+    ticket_name = base_name
+    counter = 1
+
+    while discord.utils.get(guild.text_channels, name=ticket_name):
+        ticket_name = f"{base_name}-{counter}"
+        counter += 1
+
+    return ticket_name
 
 class GeneralSupportModal(discord.ui.Modal, title="General Support"):
     roblox = discord.ui.TextInput(
@@ -883,27 +897,94 @@ class GeneralSupportModal(discord.ui.Modal, title="General Support"):
 
         category = guild.get_channel(CATEGORY_ID)
 
-        safe_name = re.sub(
-            r"[^a-z0-9-]",
-            "",
-            interaction.user.name.lower()
+        ticket_name = get_next_ticket_name(
+            guild,
+            "general",
+            interaction.user.name
+        )
+
+        await guild.create_text_channel(
+            name=ticket_name,
+            category=category,
+            overwrites=overwrites
+        )
+        ticket_name = get_next_ticket_name(
+        guild,
+        "partnership",
+        interaction.user.name
+        )
+        
+        ticket_channel = await guild.create_text_channel(
+                name=ticket_name,
+                category=category,
+                overwrites=overwrites
         )
 
         embed = discord.Embed(
-            title="Ticket Error",
-            description=f"You already have this type of ticket open. #general-{safe_name}",
-            color=discord.Color.red()
+            title="In-Game Report",
+            description=f"Welcome. Staff will be with you shortly. In the meantime, please explain the issue thoroughly. If you wish to close the ticket, click the 🔒button.",
+            color=embed_color)
+        embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
+        embed1 = discord.Embed(
+            title="Report Details",
+            color=embed_color)
+        embed1.add_field(name="What is your Roblox username?", value=f'```{self.roblox.value}```', inline=False)
+        embed1.add_field(name="What is your issue?", value=f'```{self.issue.value}```', inline=False)
+        embed1.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
+
+        view = discord.ui.View()
+
+        close_button = discord.ui.Button(
+                label="Close",
+                style=discord.ButtonStyle.red,
+                emoji="🔒"
         )
 
-        if guild.get_channel(f"general-{safe_name}") is not None:
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-        
-        await guild.create_text_channel(
-            name=f"general-{safe_name}",
-            category=category,
-            overwrites=overwrites
-        )      
+        async def close_callback(interaction: discord.Interaction):
+            if interaction.user != member and staff not in interaction.user.roles:
+                await interaction.response.send_message(
+                        "You cannot close this ticket.",
+                        ephemeral=True
+                    )
+                return
+            transcript = await chat_exporter.export(
+                    interaction.channel,
+                    limit=None
+                )
+            if transcript is None:
+                    await interaction.response.send_message(
+                        "Transcript couldn't be generated.",
+                        ephemeral=True
+                    )
+                    return
+            with open(f"{interaction.channel.name}.html", "w", encoding="utf-8") as f:
+                    f.write(transcript)
+            log_channel = bot.get_channel(channel_log_ticket)
+
+            filename = f"{interaction.channel.name}.html"
+
+            with open(filename, "w", encoding="utf-8") as f:
+                    f.write(transcript)
+
+            embed = discord.Embed(
+                    title="Ticket Logged",
+                    description=f"Ticket closed by {interaction.user.mention}. Transcript attached.",
+                    color=embed_color
+                )
+            embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
+            embed.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
+            await log_channel.send(
+                    embed=embed,
+                    file=discord.File(filename)
+                )
+
+            os.remove(filename)
+            await interaction.channel.delete()
+
+        close_button.callback = close_callback
+        view.add_item(close_button)
+        await ticket_channel.send(embeds=[embed, embed1], view=view) 
+
 
 class PartnershipSupportModal(discord.ui.Modal, title="Partnership Support"):
     roblox = discord.ui.TextInput(
@@ -972,27 +1053,83 @@ class PartnershipSupportModal(discord.ui.Modal, title="Partnership Support"):
 
         category = guild.get_channel(CATEGORY_ID)
 
-        safe_name = re.sub(
-            r"[^a-z0-9-]",
-            "",
-            interaction.user.name.lower()
+        ticket_name = get_next_ticket_name(
+        guild,
+        "partnership",
+        interaction.user.name
         )
-
-        embed = discord.Embed(
-            title="Ticket Error",
-            description=f"You already have this type of ticket open. #partnership-{safe_name}",
-            color=discord.Color.red()
-        )
-
-        if guild.get_channel(f"partnership-{safe_name}") is not None:
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
         
-        await guild.create_text_channel(
-            name=f"partnership-{safe_name}",
+        ticket_channel = await guild.create_text_channel(
+            name=ticket_name,
             category=category,
             overwrites=overwrites
         )
+        embed = discord.Embed(
+            title="In-Game Report",
+            description=f"Welcome. Staff will be with you shortly. In the meantime, please explain the issue thoroughly. If you wish to close the ticket, click the 🔒button.",
+            color=embed_color)
+        embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
+        embed1 = discord.Embed(
+            title="Report Details",
+            color=embed_color)
+        embed1.add_field(name="What is your Roblox username?", value=f'```{self.roblox.value}```', inline=False)
+        embed1.add_field(name="What is the name of your group?", value=f'```{self.group_name.value}```', inline=False)
+        embed1.add_field(name="What type of group is your group?", value=f'```{self.type.value}```', inline=False)
+        embed1.add_field(name="Are you the group owner?", value=f'```{self.owner.value}```', inline=False)
+        embed1.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
+
+        view = discord.ui.View()
+
+        close_button = discord.ui.Button(
+                label="Close",
+                style=discord.ButtonStyle.red,
+                emoji="🔒"
+        )
+
+        async def close_callback(interaction: discord.Interaction):
+            if interaction.user != member and staff not in interaction.user.roles:
+                await interaction.response.send_message(
+                        "You cannot close this ticket.",
+                        ephemeral=True
+                    )
+                return
+            transcript = await chat_exporter.export(
+                    interaction.channel,
+                    limit=None
+                )
+            if transcript is None:
+                    await interaction.response.send_message(
+                        "Transcript couldn't be generated.",
+                        ephemeral=True
+                    )
+                    return
+            with open(f"{interaction.channel.name}.html", "w", encoding="utf-8") as f:
+                    f.write(transcript)
+            log_channel = bot.get_channel(channel_log_ticket)
+
+            filename = f"{interaction.channel.name}.html"
+
+            with open(filename, "w", encoding="utf-8") as f:
+                    f.write(transcript)
+
+            embed = discord.Embed(
+                    title="Ticket Logged",
+                    description=f"Ticket closed by {interaction.user.mention}. Transcript attached.",
+                    color=embed_color
+                )
+            embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
+            embed.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
+            await log_channel.send(
+                    embed=embed,
+                    file=discord.File(filename)
+                )
+
+            os.remove(filename)
+            await interaction.channel.delete()
+
+        close_button.callback = close_callback
+        view.add_item(close_button)
+        await ticket_channel.send(embeds=[embed, embed1], view=view)        
 
 class InGameReportsModal(discord.ui.Modal, title="In-Game Reports"):
     roblox = discord.ui.TextInput(
@@ -1046,27 +1183,18 @@ class InGameReportsModal(discord.ui.Modal, title="In-Game Reports"):
                     send_polls=True,
                     use_application_commands=True,
                 )
-            }             
+            }       
 
             category = guild.get_channel(CATEGORY_ID)
-            safe_name = re.sub(
-                r"[^a-z0-9-]",
-                "",
-                interaction.user.name.lower()
-            )
 
-            embed = discord.Embed(
-                title="Ticket Error",
-                description=f"You already have this type of ticket open. #report-{safe_name}",
-                color=discord.Color.red()
+            ticket_name = get_next_ticket_name(
+                guild,
+                "report",
+                interaction.user.name
             )
-
-            if guild.get_channel(f"report-{safe_name}") is not None:
-                await interaction.response.send_message(embed=embed, ephemeral=True)
-                return
             
             ticket_channel = await guild.create_text_channel(
-                name=f"report-{safe_name}",
+                name=ticket_name,
                 category=category,
                 overwrites=overwrites
             )
@@ -1075,7 +1203,67 @@ class InGameReportsModal(discord.ui.Modal, title="In-Game Reports"):
                 title="In-Game Report",
                 description=f"Welcome. Staff will be with you shortly. In the meantime, please explain the issue thoroughly. If you wish to close the ticket, click the 🔒button.",
                 color=embed_color)
-            await ticket_channel.send(embed=embed)
+            embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
+            embed1 = discord.Embed(
+                title="Report Details",
+                color=embed_color)
+            embed1.add_field(name="Roblox Username", value=f'```{self.roblox.value}```', inline=False)
+            embed1.add_field(name="Reported User", value=f'```{self.reported_user.value}```', inline=False)
+            embed1.add_field(name="Reason", value=f'```{self.reason.value}```', inline=False)
+            embed1.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
+
+            view = discord.ui.View()
+
+            close_button = discord.ui.Button(
+                label="Close",
+                style=discord.ButtonStyle.red,
+                emoji="🔒"
+            )
+
+            async def close_callback(interaction: discord.Interaction):
+                if interaction.user != member and staff not in interaction.user.roles:
+                    await interaction.response.send_message(
+                        "You cannot close this ticket.",
+                        ephemeral=True
+                    )
+                    return
+                transcript = await chat_exporter.export(
+                    interaction.channel,
+                    limit=None
+                )
+                if transcript is None:
+                    await interaction.response.send_message(
+                        "Transcript couldn't be generated.",
+                        ephemeral=True
+                    )
+                    return
+                with open(f"{interaction.channel.name}.html", "w", encoding="utf-8") as f:
+                    f.write(transcript)
+                log_channel = bot.get_channel(channel_log_ticket)
+
+                filename = f"{interaction.channel.name}.html"
+
+                with open(filename, "w", encoding="utf-8") as f:
+                    f.write(transcript)
+
+                embed = discord.Embed(
+                    title="Ticket Logged",
+                    description=f"Ticket closed by {interaction.user.mention}. Transcript attached.",
+                    color=embed_color
+                )
+                embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
+                embed.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
+                await log_channel.send(
+                    embed=embed,
+                    file=discord.File(filename)
+                )
+
+                os.remove(filename)
+                await interaction.channel.delete()
+
+            close_button.callback = close_callback
+            view.add_item(close_button)
+            await ticket_channel.send(embeds=[embed, embed1], view=view)
 
 def get_excluded_role_ids(config_data=None):
     if config_data is None:
