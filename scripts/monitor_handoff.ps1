@@ -139,8 +139,19 @@ if (Test-LocalBotRunning) {
     if (Test-Path $localReadyFlag) {
         Remove-Item $localReadyFlag -Force -ErrorAction SilentlyContinue
     }
+
+    # Kill the local bot before starting cloud
+    try {
+        $pid = (Get-Content $pidFile -ErrorAction Stop).Trim()
+        if ($pid -and (Get-Process -Id ([int]$pid) -ErrorAction SilentlyContinue)) {
+            Stop-Process -Id ([int]$pid) -Force -ErrorAction SilentlyContinue
+        }
+    }
+    catch {}
+    Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+
     Dispatch-CloudWorkflow -RepoName $repoName -Token $token
-    Write-Host "Internet is down; cloud fallback started."
+    Write-Host "Internet is down; local bot stopped, cloud fallback started."
     exit 0
 }
 

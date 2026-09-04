@@ -214,8 +214,16 @@ embed_author_icon = {"icon_url": "https://media.discordapp.net/attachments/15060
 embed_footer_text = {"text": "Area - 14 Ticket System"}
 embed_footer_icon = {"icon_url": "https://media.discordapp.net/attachments/1506041053344698379/1526271006266757231/area-14-1.jpg?ex=6a6ecde4&is=6a6d7c64&hm=dc583901adf693945b78c9b5df0092bf126e6ef344725a8755937414e336888d&=&format=webp"}
 
+views_loaded = False
+
 @bot.event
 async def on_ready():
+    global views_loaded
+    print("=" * 40)
+    print("READY")
+    print("PID:", os.getpid())
+    print("Bot:", bot.user)
+    print("=" * 40)
     logger.info(f'✅ Bot logged in as {bot.user.name} (ID: {bot.user.id})')
     logger.info(f'Connected to {len(bot.guilds)} guild(s)')
     # Debug: show whether the members intent is enabled for this bot
@@ -247,6 +255,9 @@ async def on_ready():
     if not sync_roles.is_running():
         sync_roles.start()
         logger.info("🔄 Started periodic role sync (every 30 minutes)")
+    if not views_loaded:
+        bot.add_view(SupportTicketView())
+        views_loaded = True
 
 @tasks.loop(minutes=30)
 async def sync_roles():
@@ -454,6 +465,7 @@ active_sync_targets = set()
 
 
 async def perform_manual_sync(triggering_message):
+    logger.warning(f"perform_manual_sync called from message id={getattr(triggering_message, 'id', None)} channel={getattr(triggering_message, 'channel', None)}")
     """Perform a one-off sync and update a status message every 2 seconds.
     This version fetches full member lists from source and target guilds to avoid cache misses.
     """
@@ -634,11 +646,18 @@ class GeneralSupportModal(discord.ui.Modal, title="General Support"):
         required=True
     ) 
     async def on_submit(self, interaction: discord.Interaction):
-        STAFF_ROLE_ID = 1389925525312507924
+        STAFF_ROLE_ID = 1363831936153555195
+        CATEGORY_ID = 1389925525312507924
+
         guild = interaction.guild
         everyone = guild.default_role
         member = interaction.user
         staff = guild.get_role(STAFF_ROLE_ID)
+
+        print(f"Guild: {guild}")
+        print(f"Staff role: {staff}")
+        print(f"Staff role ID: {STAFF_ROLE_ID}")
+        print(f"Category ID: {CATEGORY_ID}")
         overwrites = {
             everyone: discord.PermissionOverwrite(view_channel=False),
             member: discord.PermissionOverwrite(
@@ -666,8 +685,6 @@ class GeneralSupportModal(discord.ui.Modal, title="General Support"):
                 use_application_commands=True,
             )
         } 
-
-        CATEGORY_ID = 1389925682678730782
 
         category = guild.get_channel(CATEGORY_ID)
 
@@ -713,6 +730,8 @@ class PartnershipSupportModal(discord.ui.Modal, title="Partnership Support"):
     )
     async def on_submit(self, interaction: discord.Interaction):
         STAFF_ROLE_ID = 1389925525312507924
+        CATEGORY_ID = 1389925682678730782
+
         guild = interaction.guild
         everyone = guild.default_role
         member = interaction.user
@@ -744,8 +763,6 @@ class PartnershipSupportModal(discord.ui.Modal, title="Partnership Support"):
                 use_application_commands=True,
             )
         } 
-
-        CATEGORY_ID = 1389925682678730782
 
         category = guild.get_channel(CATEGORY_ID)
 
@@ -780,10 +797,13 @@ class InGameReportsModal(discord.ui.Modal, title="In-Game Reports"):
     )
     async def on_submit(self, interaction: discord.Interaction):
             STAFF_ROLE_ID = 1389925525312507924
+            CATEGORY_ID = 1509601039412625439
+
             guild = interaction.guild
             everyone = guild.default_role
             member = interaction.user
             staff = guild.get_role(STAFF_ROLE_ID)
+
             overwrites = {
                 everyone: discord.PermissionOverwrite(view_channel=False),
                 member: discord.PermissionOverwrite(
@@ -812,8 +832,6 @@ class InGameReportsModal(discord.ui.Modal, title="In-Game Reports"):
                 )
             }             
 
-            CATEGORY_ID = 1509601039412625439
-
             category = guild.get_channel(CATEGORY_ID)
             safe_name = re.sub(
                 r"[^a-z0-9-]",
@@ -826,77 +844,9 @@ class InGameReportsModal(discord.ui.Modal, title="In-Game Reports"):
                 overwrites=overwrites
             )
 
-@bot.event
-async def on_message(message):
-    if message.author.bot:
-        return
-
-    content = message.content.strip().lower()
-    if content == 'a!start':
-        if not is_controlled_user(message.author.id):
-            embed = discord.Embed(title="Unauthorized",
-                                  description="You are not authorized to use this command.",
-                                  color=discord.Color.red())
-            await message.channel.send(embed=embed)
-            return
-        set_sync_enabled(True)
-        embed = discord.Embed(title="Sync Started",
-                              description="Role sync has been started.",
-                              color=discord.Color.green())
-        await message.channel.send(embed=embed)
-        return
-
-    if content == 'a!stop':
-        if not is_controlled_user(message.author.id):
-            embed = discord.Embed(title="Unauthorized",
-                                  description="You are not authorized to use this command.",
-                                  color=discord.Color.red())
-            await message.channel.send(embed=embed)
-            return
-        set_sync_enabled(False)
-        embed = discord.Embed(title="Sync Paused",
-                              description="Sync has been paused.",
-                              color=discord.Color.yellow())
-        await message.channel.send(embed=embed)
-        return
-
-    if content == 'a!sync':
-        if not is_controlled_user(message.author.id):
-            embed = discord.Embed(title="Unauthorized",
-                                  description="You are not authorized to use this command.",
-                                  color=discord.Color.red())
-            await message.channel.send(embed=embed)
-            return
-        try:
-            await perform_manual_sync(message)
-        except ValueError as exc:
-            embed = discord.Embed(title="Sync Error",
-                                  description=str(exc),
-                                  color=discord.Color.red())
-            await message.channel.send(embed=embed)
-        return
-    if content == 'a!debug':
-        # Provide a quick debug dump to the invoking channel
-        config_data = load_config()
-        dangerous_perms_data = load_dangerous_perms()
-        source_guild_ids = get_source_guild_ids(config_data)
-        role_mapping = build_role_mapping(config_data)
-        lines = [
-            f"Debug dump:",
-            f"Bot ID: {bot.user.id}",
-            f"Members intent: {bot.intents.members}",
-            f"Source guild IDs: {source_guild_ids}",
-            f"Target guild ID: {config_data['TARGET_GUILD_ID']}",
-            f"Role mappings loaded: {len(role_mapping)} entries",
-            f"Dangerous permissions loaded: {len(dangerous_perms_data.get('dangerous_permissions', []))}"
-        ]
-        await message.channel.send("\n".join(lines))
-        return
-
-    await bot.process_commands(message)
-
 class SupportTicketView(discord.ui.View):
-
+    def __init__(self):
+        super().__init__(timeout=None)
     @discord.ui.select(
         custom_id="support_ticket_select",
         placeholder="Select a ticket category...",
@@ -937,7 +887,7 @@ class SupportTicketView(discord.ui.View):
             return
 
 @bot.command(name='&^V1mticket')
-async def ticket_command(ctx):
+async def ticket_commandmain(ctx):
     embed = discord.Embed(
         title="⚒️ | Support Ticket",
         description="Welcome to the support ticket system! Please select the type of support you need from the options below.",
@@ -948,23 +898,7 @@ async def ticket_command(ctx):
     embed.add_field(name="🎮  |  In-Game Reports", value="If you wish to report someone rule-breaking in-game, please select this option.", inline=False)
     embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
     embed.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
-    await ctx.send(embed=embed, view=SupportTicketView())
-
-@bot.command(name='&^V2ticket')
-async def ticket_command(ctx):
-    embed = discord.Embed(
-        title="⚒️ | Support Ticket",
-        description="Welcome to the support ticket system! Please select the type of support you need from the options below.",
-        color=embed_color,
-    )
-    embed.add_field(name="⚒️  |  General Support", value="If you have any general questions or inquiries, please select this option.", inline=False)
-    embed.add_field(name="🤝  |  Partnership Support", value="If you wish to partnership with Area - 14 or discuss partnership collaborations, select this option.", inline=False)
-    embed.add_field(name="🎮  |  In-Game Reports", value="If you wish to report someone rule-breaking in-game, please select this option.", inline=False)
-    embed.set_author(name=embed_author_name["name"], icon_url=embed_author_icon["icon_url"])
-    embed.set_footer(text=embed_footer_text["text"], icon_url=embed_footer_icon["icon_url"])
-    await ctx.send(embed=embed, view=SupportTicketView())
-
-
+    msg = await ctx.send(embed=embed, view=SupportTicketView())
 
 if __name__ == "__main__":
     if not token:
