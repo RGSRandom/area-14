@@ -240,16 +240,7 @@ async def on_ready():
         logger.info("[DEBUG] target guild resolution raised an exception")
 
     logger.info("=" * 50)
-    logger.info("🚀 Running startup role sync...")
-    logger.info("=" * 50)
-
-    try:
-        await perform_manual_sync(None)
-    except Exception as e:
-        logger.error(f"Startup sync failed: {e}", exc_info=True)
-
-    logger.info("=" * 50)
-    logger.info("✅ Startup sync finished")
+    logger.info("⏭️ Skipping startup role sync (disabled)")
     logger.info("=" * 50)
 
     # Start the periodic sync afterwards
@@ -373,14 +364,20 @@ async def perform_manual_sync(triggering_message):
         embed = discord.Embed(title="Error: Guilds not available",
                               description="One or more configured servers are not available to the bot. Please check the bot's permissions.",
                               color=discord.Color.red())
-        await status_msg.edit(embed=embed)
+        if triggering_message:
+            await triggering_message.channel.send(embed=embed)
+        else:
+            logger.error("Startup sync: one or more configured servers are not available to the bot.")
         return
 
     if TARGET_GUILD_ID in active_sync_targets:
         embed = discord.Embed(title="Sync Already Running",
                               description="A sync is already running for the target server; cannot start another.",
                               color=discord.Color.orange())
-        await status_msg.edit(embed=embed)
+        if triggering_message:
+            await triggering_message.channel.send(embed=embed)
+        else:
+            logger.warning("Startup sync: a sync is already running for the target server; skipping.")
         return
 
     # Mark sync active for this target
@@ -403,7 +400,11 @@ async def perform_manual_sync(triggering_message):
     if is_test_mode_enabled(config_data):
         test_user_id = get_test_user_id(config_data)
         if test_user_id is None:
-            await triggering_message.channel.send("Test mode enabled. TEST_USER_ID wasn't found in config.")
+            msg = "Test mode enabled. TEST_USER_ID wasn't found in config."
+            if triggering_message:
+                await triggering_message.channel.send(msg)
+            else:
+                logger.error(msg)
             return
 
     source_members_map = {}
@@ -494,7 +495,10 @@ async def perform_manual_sync(triggering_message):
         embed =discord.Embed(title="Manual Sync Complete",
                             description=f"Processed {processed}/{total_members} members - {changes} role changes made",
                             color=discord.Color.green())
-        await status_msg.edit(embed=embed)
+        if status_msg:
+            await status_msg.edit(embed=embed)
+        else:
+            logger.info(f"✅ Startup sync complete: Processed {processed}/{total_members} members - {changes} role changes made")
 
     finally:
         active_sync_targets.discard(TARGET_GUILD_ID)

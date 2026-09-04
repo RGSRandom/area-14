@@ -70,7 +70,8 @@ if (-not (Test-Path (Join-Path $repoRoot ".env"))) {
 
 # Run bot in the background
 Write-Host "`nStarting bot...`n" -ForegroundColor Green
-$process = Start-Process -FilePath (Join-Path $repoRoot "venv\Scripts\python.exe") -ArgumentList @("-u", $mainFile) -WorkingDirectory $repoRoot -WindowStyle Hidden -RedirectStandardOutput $logPath -RedirectStandardError $logPath -PassThru
+$errLogPath = Join-Path $repoRoot "discord-bot-local_err.log"
+$process = Start-Process -FilePath (Join-Path $repoRoot "venv\Scripts\python.exe") -ArgumentList @("-u", $mainFile) -WorkingDirectory $repoRoot -WindowStyle Hidden -RedirectStandardOutput $logPath -RedirectStandardError $errLogPath -PassThru
 $process.Id | Set-Content $pidFile
 Set-Content -Path $localReadyFlag -Value "ready"
 Write-Host "Bot started with PID $($process.Id)" -ForegroundColor Green
