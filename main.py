@@ -2248,6 +2248,7 @@ async def revoke(ctx, punishment_id: str):
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandOnCooldown):
+        print("An error occurred. ???")
         return
     else:
         raise error
