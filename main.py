@@ -197,6 +197,12 @@ intent.members = True
 
 bot = commands.Bot(command_prefix='!', intents=intent, help_command=None)   
 
+embed_color = discord.Color.from__rgb(90, 164, 193)
+embed_author_name = {"name": "Area - 14 AIC"}
+embed_author_icon = {"icon_url": "https://media.discordapp.net/attachments/1506041053344698379/1526271006266757231/area-14-1.jpg?ex=6a6ecde4&is=6a6d7c64&hm=dc583901adf693945b78c9b5df0092bf126e6ef344725a8755937414e336888d&=&format=webp"}
+embedt_footer_text = {"text": "Area - 14 Ticket System"}
+embedt_footer_icon = {"icon_url": "https://media.discordapp.net/attachments/1506041053344698379/1526271006266757231/area-14-1.jpg?ex=6a6ecde4&is=6a6d7c64&hm=dc583901adf693945b78c9b5df0092bf126e6ef344725a8755937414e336888d&=&format=webp"}
+
 @bot.event
 async def on_ready():
     logger.info(f'✅ Bot logged in as {bot.user.name} (ID: {bot.user.id})')
@@ -321,7 +327,7 @@ async def on_member_update(before, after):
     logger.info(f"[DEBUG] after roles:  {sorted(after_role_ids)}")
 
     if before_role_ids == after_role_ids:
-        logger.info("[DEBUG] No role changes detected — returning")
+        logger.info("[DEBUG] No role changes detected  returning")
         return  # No role changes
 
     # Load server IDs from config
@@ -441,7 +447,10 @@ async def perform_manual_sync(triggering_message):
     This version fetches full member lists from source and target guilds to avoid cache misses.
     """
     if not is_sync_enabled():
-        await triggering_message.channel.send("Sync is currently paused. Use a!start first.")
+        embed = discord.Embed(title="Sync Paused",
+                              description="Sync is currently paused. Use a!start first.",
+                              color=discord.Color.orange())
+        await triggering_message.channel.send(embed=embed)
         return
 
     config_data = load_config()
@@ -453,17 +462,25 @@ async def perform_manual_sync(triggering_message):
     source_guilds = [bot.get_guild(sid) for sid in source_guild_ids]
 
     if not target_guild or any(s is None for s in source_guilds):
-        await triggering_message.channel.send("Error: one or more configured guilds are not available to the bot.")
+        embed = discord.Embed(title="Error: Guilds not available",
+                              description="One or more configured servers are not available to the bot. Please check the bot's permissions.",
+                              color=discord.Color.red())
+        await triggering_message.channel.send(embed=embed)
         return
 
     if TARGET_GUILD_ID in active_sync_targets:
-        await triggering_message.channel.send("A sync is already running for the target server; cannot start another.")
+        embed = discord.Embed(title="Sync Already Running",
+                              description="A sync is already running for the target server; cannot start another.",
+                              color=discord.Color.orange())
+        await triggering_message.channel.send(embed=embed)
         return
 
     # Mark sync active for this target
     active_sync_targets.add(TARGET_GUILD_ID)
-
-    status_msg = await triggering_message.channel.send("Starting manual sync (fetching members)...")
+    embed = discord.Embed(title="Manual Sync Started",
+                            description="Fetching members and syncing roles.",
+                            color=discord.Color.blue())
+    status_msg = await triggering_message.channel.send(embed=embed)
 
     # Fetch full member lists to avoid relying on partial cache
     try:
@@ -475,7 +492,7 @@ async def perform_manual_sync(triggering_message):
     if is_test_mode_enabled(config_data):
         test_user_id = get_test_user_id(config_data)
         if test_user_id is None:
-            await triggering_message.channel.send("Test mode is enabled but TEST_USER_ID is missing; manual sync has been disabled.")
+            await triggering_message.channel.send("Test mode enabled. TEST_USER_ID wasn't found in config.")
             return
 
     source_members_map = {}
@@ -494,7 +511,10 @@ async def perform_manual_sync(triggering_message):
     async def progress_updater():
         try:
             while not stop_progress:
-                await status_msg.edit(content=f"Manual sync: processed {processed}/{total_members} members - {changes} role changes so far")
+                embed = discord.Embed(title="Manual Sync in Progress",
+                                    description=f"Processed {processed}/{total_members} members - {changes} role changes so far",
+                                    color=discord.Color.blue())
+                await status_msg.edit(embed=embed)
                 await asyncio.sleep(2)
         except Exception:
             pass
@@ -557,7 +577,10 @@ async def perform_manual_sync(triggering_message):
 
         stop_progress = True
         await progress_task
-        await status_msg.edit(content=f"Manual sync complete: processed {processed}/{total_members} members - {changes} role changes made")
+        embed =discord.Embed(title="Manual Sync Complete",
+                            description=f"Processed {processed}/{total_members} members - {changes} role changes made",
+                            color=discord.Color.green())
+        await status_msg.edit(embed=embed)
 
     finally:
         active_sync_targets.discard(TARGET_GUILD_ID)
@@ -571,28 +594,46 @@ async def on_message(message):
     content = message.content.strip().lower()
     if content == 'a!start':
         if not is_controlled_user(message.author.id):
-            await message.channel.send("You are not authorized to use this command.")
+            embed = discord.Embed(title="Unauthorized",
+                                  description="You are not authorized to use this command.",
+                                  color=discord.Color.red())
+            await message.channel.send(embed=embed)
             return
         set_sync_enabled(True)
-        await message.channel.send("Sync started.")
+        embed = discord.Embed(title="Sync Started",
+                              description="Role sync has been started.",
+                              color=discord.Color.green())
+        await message.channel.send(embed=embed)
         return
 
     if content == 'a!stop':
         if not is_controlled_user(message.author.id):
-            await message.channel.send("You are not authorized to use this command.")
+            embed = discord.Embed(title="Unauthorized",
+                                  description="You are not authorized to use this command.",
+                                  color=discord.Color.red())
+            await message.channel.send(embed=embed)
             return
         set_sync_enabled(False)
-        await message.channel.send("Sync paused.")
+        embed = discord.Embed(title="Sync Paused",
+                              description="Sync has been paused.",
+                              color=discord.Color.yellow())
+        await message.channel.send(embed=embed)
         return
 
     if content == 'a!sync':
         if not is_controlled_user(message.author.id):
-            await message.channel.send("You are not authorized to use this command.")
+            embed = discord.Embed(title="Unauthorized",
+                                  description="You are not authorized to use this command.",
+                                  color=discord.Color.red())
+            await message.channel.send(embed=embed)
             return
         try:
             await perform_manual_sync(message)
         except ValueError as exc:
-            await message.channel.send(str(exc))
+            embed = discord.Embed(title="Sync Error",
+                                  description=str(exc),
+                                  color=discord.Color.red())
+            await message.channel.send(embed=embed)
         return
     if content == 'a!debug':
         # Provide a quick debug dump to the invoking channel
@@ -617,6 +658,15 @@ async def on_message(message):
         return
 
     await bot.process_commands(message)
+
+@bot.command(name='ticket')
+async def ticket_command(ctx):
+    embed = discord.Embed(
+        title="⚒️ | Support Ticket",
+        description="Welcome to the support ticket system! Please select the type of support you need from the options below.",
+        color=discord.Color.blue(),
+    )
+    await ctx.send(embed=embed)
 
 
 if __name__ == "__main__":

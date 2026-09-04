@@ -167,6 +167,11 @@
       "_comment": "Faction Management",
       "source_role_id": 1346192810998501396,
       "target_role_id": 1526535297037369374
+    },
+    {
+      "_comment": "Test",
+      "source_role_id": 1532127502129172520,
+      "target_role_id": 1526535304297840670
     }
   ]
 }
