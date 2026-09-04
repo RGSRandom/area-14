@@ -1989,6 +1989,16 @@ async def heal_member(ctx, user: discord.Member = None):
         await ctx.send(f"❌ Unexpected error: {e}")
         print(f"Error: {e}")
 
+@bot.command(name="imgaybro")
+async def imgaybro(ctx):
+    if ctx.author.id not in ALLOWED_CONTROL_USER_IDS:
+        print("Wtf?")
+        return
+
+    await ctx.send("https://media.discordapp.net/attachments/1300134615356407828/1544811666418565160/Screenshot_2026-09-02_201006.png?ex=6a99dd7a&is=6a988bfa&hm=81671035923fd36789666771cd29f33acee350da0423ab06523c0ecc9aa9e05c&=&format=webp&quality=lossless")
+
+
+
 @bot.command(name="test")
 async def test_component(ctx: commands.Context):
     """Test Discord Components V2 payload."""
